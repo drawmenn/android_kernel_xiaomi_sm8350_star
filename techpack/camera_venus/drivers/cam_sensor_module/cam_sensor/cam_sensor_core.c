@@ -112,7 +112,7 @@ static void cam_sensor_log_state(struct cam_sensor_ctrl_t *s_ctrl,
 	if (!s_ctrl || !s_ctrl->sensordata)
 		return;
 
-	pr_info("venus_cam: sensor %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x sensor_id:0x%x slave:0x%x rc:%d\n",
+	pr_debug("venus_cam: sensor %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x sensor_id:0x%x slave:0x%x rc:%d\n",
 		tag, s_ctrl->soc_info.index, s_ctrl->sensor_state,
 		s_ctrl->power_on, s_ctrl->bridge_intf.device_hdl,
 		s_ctrl->bridge_intf.link_hdl, s_ctrl->bridge_intf.session_hdl,
@@ -137,10 +137,10 @@ static void cam_sensor_disable_sof_timer_locked(
 	timer.state = false;
 	rc = s_ctrl->bridge_intf.crm_cb->notify_timer(&timer);
 	if (rc)
-		pr_warn("venus_cam: sensor disable SOF timer failed reason:%s slot:%d rc:%d\n",
+		pr_debug("venus_cam: sensor disable SOF timer failed reason:%s slot:%d rc:%d\n",
 			reason, s_ctrl->soc_info.index, rc);
 	else
-		pr_info("venus_cam: sensor SOF timer disabled reason:%s slot:%d\n",
+		pr_debug("venus_cam: sensor SOF timer disabled reason:%s slot:%d\n",
 			reason, s_ctrl->soc_info.index);
 }
 
@@ -158,7 +158,7 @@ static void cam_sensor_destroy_device_handle_locked(
 
 	rc = cam_destroy_device_hdl(s_ctrl->bridge_intf.device_hdl);
 	if (rc < 0)
-		pr_warn("venus_cam: sensor destroy handle failed reason:%s slot:%d hdl:0x%x rc:%d\n",
+		pr_debug("venus_cam: sensor destroy handle failed reason:%s slot:%d hdl:0x%x rc:%d\n",
 			reason, s_ctrl->soc_info.index,
 			s_ctrl->bridge_intf.device_hdl, rc);
 
@@ -190,7 +190,7 @@ static void cam_sensor_recover_stream_failure_locked(
 		rc = cam_sensor_apply_settings(s_ctrl, 0,
 			CAM_SENSOR_PACKET_OPCODE_SENSOR_STREAMOFF);
 		if (rc < 0)
-			pr_warn("venus_cam: sensor recovery streamoff failed reason:%s slot:%d rc:%d\n",
+			pr_debug("venus_cam: sensor recovery streamoff failed reason:%s slot:%d rc:%d\n",
 				reason, s_ctrl->soc_info.index, rc);
 	}
 
@@ -199,7 +199,7 @@ static void cam_sensor_recover_stream_failure_locked(
 	if (s_ctrl->power_on) {
 		rc = cam_sensor_power_down(s_ctrl);
 		if (rc < 0)
-			pr_warn("venus_cam: sensor recovery powerdown failed reason:%s slot:%d rc:%d\n",
+			pr_debug("venus_cam: sensor recovery powerdown failed reason:%s slot:%d rc:%d\n",
 				reason, s_ctrl->soc_info.index, rc);
 	}
 
@@ -1066,7 +1066,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		case CAM_RELEASE_DEV: {
 			cam_sensor_log_state(s_ctrl, "release_begin", 0);
 			if (s_ctrl->sensor_state == CAM_SENSOR_START) {
-				pr_warn("venus_cam: sensor release while START, forcing stream cleanup slot:%d\n",
+				pr_debug("venus_cam: sensor release while START, forcing stream cleanup slot:%d\n",
 					s_ctrl->soc_info.index);
 				cam_sensor_recover_stream_failure_locked(s_ctrl,
 					"release_from_start", 0);
@@ -1075,14 +1075,14 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) &&
 				(s_ctrl->bridge_intf.device_hdl == -1) &&
 				!s_ctrl->power_on) {
-				pr_info("venus_cam: sensor release ignored, already idle slot:%d\n",
+				pr_debug("venus_cam: sensor release ignored, already idle slot:%d\n",
 					s_ctrl->soc_info.index);
 				rc = 0;
 				goto release_mutex;
 			}
 
 			if (s_ctrl->bridge_intf.link_hdl != -1) {
-				pr_warn("venus_cam: sensor release forcing stale link cleanup state:%d link:0x%x slot:%d\n",
+				pr_debug("venus_cam: sensor release forcing stale link cleanup state:%d link:0x%x slot:%d\n",
 					s_ctrl->sensor_state,
 					s_ctrl->bridge_intf.link_hdl,
 					s_ctrl->soc_info.index);
@@ -1103,7 +1103,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			cam_sensor_release_per_frame_resource(s_ctrl);
 			cam_sensor_release_stream_rsc(s_ctrl);
 			if (s_ctrl->bridge_intf.device_hdl == -1) {
-				pr_warn("venus_cam: sensor release had no device handle slot:%d\n",
+				pr_debug("venus_cam: sensor release had no device handle slot:%d\n",
 					s_ctrl->soc_info.index);
 				rc = 0;
 				goto release_idle;
@@ -1192,7 +1192,7 @@ release_idle:
 		case CAM_STOP_DEV: {
 			if (s_ctrl->sensor_state != CAM_SENSOR_START) {
 				rc = 0;
-				pr_warn("venus_cam: sensor stop ignored in state:%d slot:%d\n",
+				pr_debug("venus_cam: sensor stop ignored in state:%d slot:%d\n",
 					s_ctrl->sensor_state, s_ctrl->soc_info.index);
 				goto release_mutex;
 			}
@@ -1414,7 +1414,7 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 	}
 
 	if (s_ctrl->power_on) {
-		pr_warn("venus_cam: sensor power_up skipped, already on slot:%d state:%d\n",
+		pr_debug("venus_cam: sensor power_up skipped, already on slot:%d state:%d\n",
 			s_ctrl->soc_info.index, s_ctrl->sensor_state);
 		return 0;
 	}
@@ -1507,7 +1507,7 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 	}
 
 	if (!s_ctrl->power_on) {
-		pr_warn("venus_cam: sensor power_down skipped, already off slot:%d state:%d\n",
+		pr_debug("venus_cam: sensor power_down skipped, already off slot:%d state:%d\n",
 			s_ctrl->soc_info.index, s_ctrl->sensor_state);
 		return 0;
 	}
@@ -1735,23 +1735,30 @@ int cam_sensor_process_evt(struct cam_req_mgr_link_evt_data *event_data)
 	s_ctrl = (struct cam_sensor_ctrl_t *)
 		cam_get_device_priv(event_data->dev_hdl);
 	if (!s_ctrl) {
-		pr_warn("venus_cam: sensor event has no device priv dev:0x%x evt:%d req:%llu\n",
+		pr_debug("venus_cam: sensor event has no device priv dev:0x%x evt:%d req:%llu\n",
 			event_data->dev_hdl, event_data->evt_type,
 			event_data->req_id);
 		return -EINVAL;
 	}
 
 	mutex_lock(&(s_ctrl->cam_sensor_mutex));
-	pr_info("venus_cam: sensor event slot:%d evt:%d req:%llu err:%d state:%d power:%d dev:0x%x link:0x%x\n",
-		s_ctrl->soc_info.index, event_data->evt_type,
-		event_data->req_id, event_data->u.error,
-		s_ctrl->sensor_state, s_ctrl->power_on,
-		s_ctrl->bridge_intf.device_hdl,
-		s_ctrl->bridge_intf.link_hdl);
 
-	if (event_data->evt_type == CAM_REQ_MGR_LINK_EVT_SOF_FREEZE)
+	if (event_data->evt_type == CAM_REQ_MGR_LINK_EVT_SOF_FREEZE) {
+		pr_debug("venus_cam: sensor SOF freeze slot:%d req:%llu err:%d state:%d power:%d dev:0x%x link:0x%x\n",
+			s_ctrl->soc_info.index, event_data->req_id,
+			event_data->u.error, s_ctrl->sensor_state,
+			s_ctrl->power_on, s_ctrl->bridge_intf.device_hdl,
+			s_ctrl->bridge_intf.link_hdl);
 		cam_sensor_recover_stream_failure_locked(s_ctrl,
 			"crm_sof_freeze", -ETIMEDOUT);
+	} else {
+		pr_debug("venus_cam: sensor event slot:%d evt:%d req:%llu err:%d state:%d power:%d dev:0x%x link:0x%x\n",
+			s_ctrl->soc_info.index, event_data->evt_type,
+			event_data->req_id, event_data->u.error,
+			s_ctrl->sensor_state, s_ctrl->power_on,
+			s_ctrl->bridge_intf.device_hdl,
+			s_ctrl->bridge_intf.link_hdl);
+	}
 
 	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
 	return 0;

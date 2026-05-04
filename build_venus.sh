@@ -64,6 +64,14 @@ CONFIG_ARGS=(
   --disable ZRAM_DEF_COMP_ZSTD \
   --disable ZRAM_DEF_COMP_LZ4HC \
   --disable ZRAM_DEF_COMP_842 \
+  --enable F2FS_FS_COMPRESSION \
+  --enable F2FS_FS_LZO \
+  --enable F2FS_FS_LZORLE \
+  --enable F2FS_FS_LZ4 \
+  --enable F2FS_FS_LZ4HC \
+  --enable F2FS_FS_ZSTD \
+  --enable F2FS_UNFAIR_RWSEM \
+  --enable F2FS_CP_OPT \
   --enable KSU \
   --set-str KSU_FULL_NAME_FORMAT "%TAG_NAME%-%COMMIT_SHA%@%REPO_NAME%" \
   --enable KSU_MULTI_MANAGER_SUPPORT \
@@ -97,6 +105,20 @@ grep -q '^CONFIG_ZRAM_DEF_COMP="lz4"$' "$OUT_DIR/.config" || {
   echo "ERROR: ZRAM default compressor is not lz4" >&2
   exit 1
 }
+for required_config in \
+  'CONFIG_F2FS_FS_COMPRESSION=y' \
+  'CONFIG_F2FS_FS_LZO=y' \
+  'CONFIG_F2FS_FS_LZORLE=y' \
+  'CONFIG_F2FS_FS_LZ4=y' \
+  'CONFIG_F2FS_FS_LZ4HC=y' \
+  'CONFIG_F2FS_FS_ZSTD=y' \
+  'CONFIG_F2FS_UNFAIR_RWSEM=y' \
+  'CONFIG_F2FS_CP_OPT=y'; do
+  grep -q "^$required_config$" "$OUT_DIR/.config" || {
+    echo "ERROR: missing $required_config" >&2
+    exit 1
+  }
+done
 for required_config in \
   'CONFIG_KSU=y' \
   'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y' \
@@ -189,6 +211,8 @@ echo "KSU manager package restriction: disabled"
 echo "ReSukiSU multi-manager support: enabled"
 echo "ReSukiSU + SuSFS: enabled"
 echo "KPM: $([[ "$KPM" == 1 ]] && echo enabled || echo disabled)"
+echo "F2FS compression: enabled"
+echo "F2FS performance options: unfair rwsem + checkpoint fsync optimization enabled"
 echo "Recovery/TWRP KSU userspace hook guard: enabled"
 echo "Image (for TWRP prebuilt/venus/kernel): $KERNEL_IMAGE"
 echo "Image.gz: $KERNEL_IMAGE_GZ"

@@ -601,7 +601,7 @@ static void *f2fs_vmap(struct page **pages, unsigned int count)
 	void *buf = NULL;
 
 	for (i = 0; i < MAX_VMAP_RETRIES; i++) {
-		buf = vm_map_ram(pages, count, -1, PAGE_KERNEL);
+		buf = vm_map_ram(pages, count, -1);
 		if (buf)
 			break;
 		vm_unmap_aliases();

@@ -53,9 +53,10 @@
  * (examples : 10 -> 1KB; 12 -> 4KB ; 16 -> 64KB; 20 -> 1MB; etc.)
  * Increasing memory usage improves compression ratio
  * Reduced memory usage can improve speed, due to cache effect
- * Default value is 14, for 16KB, which nicely fits into Intel x86 L1 cache
+ * Default value is 15, for 32KB, which fits current arm64 mobile L1 caches
+ * and improves match precision for zram/fs compression workloads.
  */
-#define LZ4_MEMORY_USAGE 14
+#define LZ4_MEMORY_USAGE 15
 
 #define LZ4_MAX_INPUT_SIZE	0x7E000000 /* 2 113 929 216 bytes */
 #define LZ4_COMPRESSBOUND(isize)	(\

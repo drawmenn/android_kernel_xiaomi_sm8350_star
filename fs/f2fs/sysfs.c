@@ -583,7 +583,12 @@ out:
 
 #ifdef CONFIG_MACH_XIAOMI
 	if (!strcmp(a->attr.name, "gc_booster")) {
-		sbi->gc_booster = !!t;
+		WRITE_ONCE(sbi->gc_booster, !!t);
+		if (t && sbi->gc_thread) {
+			sbi->gc_thread->gc_wake = true;
+			wake_up_interruptible_all(
+				&sbi->gc_thread->gc_wait_queue_head);
+		}
 		return count;
 	}
 #endif

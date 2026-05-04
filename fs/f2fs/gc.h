@@ -30,7 +30,6 @@
 #define LIMIT_FREE_BLOCK	40 /* percentage over invalid + free space */
 #ifdef CONFIG_MACH_XIAOMI
 #define MAX_GC_COUNT		64 /* max # of recycle section once */
-#define TOPLIMIT_FREE_SEGMENT(sbi)	(reserved_segments(sbi) * 4)
 #endif
 
 #define DEF_GC_FAILED_PINNED_FILES	2048
@@ -184,32 +183,64 @@ static inline bool has_enough_invalid_blocks(struct f2fs_sb_info *sbi)
 }
 
 #ifdef CONFIG_MACH_XIAOMI
+static inline unsigned int gc_boost_min_free_segments(struct f2fs_sb_info *sbi)
+{
+	return max_t(unsigned int, reserved_segments(sbi) * 2,
+						NR_CURSEG_PERSIST_TYPE);
+}
+
+static inline unsigned int gc_boost_top_free_segments(struct f2fs_sb_info *sbi)
+{
+	return max_t(unsigned int, reserved_segments(sbi) * 4,
+			gc_boost_min_free_segments(sbi) + NR_CURSEG_PERSIST_TYPE);
+}
+
 static inline void calculate_sleep_time(struct f2fs_sb_info *sbi,
 			struct f2fs_gc_kthread *gc_th, unsigned int *wait)
 {
 	unsigned int free = free_user_blocks(sbi) >> sbi->log_blocks_per_seg;
+	unsigned int top_free = gc_boost_top_free_segments(sbi);
 	unsigned int wait_time = gc_th->min_sleep_time;
 
 	if (wait == NULL)
 		return;
 
-	if (free > TOPLIMIT_FREE_SEGMENT(sbi))
+	if (free >= top_free)
 		wait_time = gc_th->max_sleep_time;
 	else
 		wait_time += (unsigned int)div_u64(
 			(gc_th->max_sleep_time - gc_th->min_sleep_time) * free,
-			TOPLIMIT_FREE_SEGMENT(sbi));
+			top_free);
 
 	*wait = wait_time;
 }
 
 static inline unsigned int get_gc_count(struct f2fs_sb_info *sbi)
 {
-	block_t invalid_user_blocks = sbi->user_block_count -
-			written_block_count(sbi) - free_user_blocks(sbi);
-	unsigned int gc_count = (unsigned int)div_u64(
-			MAX_GC_COUNT * invalid_user_blocks,
-			sbi->user_block_count);
+	block_t user_blocks = sbi->user_block_count;
+	block_t valid_blocks = written_block_count(sbi);
+	block_t free_blocks = free_user_blocks(sbi);
+	block_t reclaimable_blocks;
+	unsigned int free = free_blocks >> sbi->log_blocks_per_seg;
+	unsigned int min_free = gc_boost_min_free_segments(sbi);
+	unsigned int gc_count;
+	unsigned int gc_cap;
+
+	if (!user_blocks || valid_blocks >= user_blocks ||
+			free_blocks >= user_blocks - valid_blocks)
+		return 1;
+
+	reclaimable_blocks = user_blocks - valid_blocks - free_blocks;
+	gc_count = (unsigned int)div_u64((u64)MAX_GC_COUNT *
+			reclaimable_blocks, user_blocks);
+
+	if (free < min_free)
+		gc_count = max_t(unsigned int, gc_count,
+			(unsigned int)div_u64((u64)MAX_GC_COUNT *
+			(min_free - free), min_free));
+
+	gc_cap = free < min_free ? MAX_GC_COUNT : MAX_GC_COUNT / 4;
+	gc_count = min_t(unsigned int, gc_count, gc_cap);
 
 	return gc_count ? gc_count : 1;
 }

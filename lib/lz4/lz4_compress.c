@@ -37,10 +37,13 @@
 #include "lz4defs.h"
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/prefetch.h>
 #include <asm/unaligned.h>
 
 static const int LZ4_minLength = (MFLIMIT + 1);
 static const int LZ4_64Klimit = ((64 * KB) + (MFLIMIT - 1));
+
+#define LZ4_PREFETCH_DISTANCE 64
 
 /*-******************************
  *	Compression functions
@@ -168,6 +171,21 @@ static FORCE_INLINE const BYTE *LZ4_getPosition(
 	return LZ4_getPositionOnHash(h, tableBase, tableType, srcBase);
 }
 
+static FORCE_INLINE void LZ4_prefetch_forward(
+	const BYTE *p,
+	const BYTE *limit)
+{
+	if ((size_t)(limit - p) >= LZ4_PREFETCH_DISTANCE)
+		prefetch(p + LZ4_PREFETCH_DISTANCE);
+}
+
+static FORCE_INLINE void LZ4_prefetch_match(
+	const BYTE *match,
+	size_t refDelta)
+{
+	if (match)
+		prefetch(match + refDelta);
+}
 
 /*
  * LZ4_compress_generic() :
@@ -261,6 +279,7 @@ static FORCE_INLINE int LZ4_compress_generic(
 
 				if (unlikely(forwardIp > mflimit))
 					goto _last_literals;
+				LZ4_prefetch_forward(forwardIp, iend);
 
 				match = LZ4_getPositionOnHash(h,
 					dictPtr->hashTable,
@@ -273,7 +292,9 @@ static FORCE_INLINE int LZ4_compress_generic(
 					} else {
 						refDelta = 0;
 						lowLimit = (const BYTE *)source;
-				}	 }
+					}
+				}
+				LZ4_prefetch_match(match, refDelta);
 
 				forwardH = LZ4_hashPosition(forwardIp,
 					tableType);
@@ -410,6 +431,7 @@ _next_match:
 				lowLimit = (const BYTE *)source;
 			}
 		}
+		LZ4_prefetch_match(match, refDelta);
 
 		LZ4_putPosition(ip, dictPtr->hashTable, tableType, base);
 
@@ -584,9 +606,11 @@ static int LZ4_compress_destSize_generic(
 
 				if (unlikely(forwardIp > mflimit))
 					goto _last_literals;
+				LZ4_prefetch_forward(forwardIp, iend);
 
 				match = LZ4_getPositionOnHash(h, ctx->hashTable,
 					tableType, base);
+				LZ4_prefetch_match(match, 0);
 				forwardH = LZ4_hashPosition(forwardIp,
 					tableType);
 				LZ4_putPositionOnHash(ip, h,
@@ -672,6 +696,7 @@ _next_match:
 
 		/* Test next position */
 		match = LZ4_getPosition(ip, ctx->hashTable, tableType, base);
+		LZ4_prefetch_match(match, 0);
 		LZ4_putPosition(ip, ctx->hashTable, tableType, base);
 
 		if ((match + MAX_DISTANCE >= ip)

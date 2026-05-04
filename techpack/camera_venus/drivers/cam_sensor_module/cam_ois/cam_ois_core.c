@@ -26,33 +26,18 @@ module_param(oisfwctrl, int, 0644);
 #define CAM_OIS_INFO_LEGACY_SIZE \
 	offsetof(struct cam_cmd_ois_info, is_ois_post_init)
 
-static bool cam_ois_log_state_is_key(const char *tag)
-{
-	return strstr(tag, "fail") ||
-		!strncmp(tag, "power_", strlen("power_")) ||
-		!strncmp(tag, "release_", strlen("release_"));
-}
-
 static void cam_ois_log_state(struct cam_ois_ctrl_t *o_ctrl,
 	const char *tag, int rc)
 {
 	if (!o_ctrl)
 		return;
 
-	if (cam_ois_log_state_is_key(tag))
-		pr_info("venus_cam: ois %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x name:%s rc:%d\n",
-			tag, o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
-			o_ctrl->power_on, o_ctrl->bridge_intf.device_hdl,
-			o_ctrl->bridge_intf.link_hdl,
-			o_ctrl->bridge_intf.session_hdl,
-			o_ctrl->ois_name, rc);
-	else
-		pr_debug("venus_cam: ois %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x name:%s rc:%d\n",
-			tag, o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
-			o_ctrl->power_on, o_ctrl->bridge_intf.device_hdl,
-			o_ctrl->bridge_intf.link_hdl,
-			o_ctrl->bridge_intf.session_hdl,
-			o_ctrl->ois_name, rc);
+	pr_debug("venus_cam: ois %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x name:%s rc:%d\n",
+		tag, o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
+		o_ctrl->power_on, o_ctrl->bridge_intf.device_hdl,
+		o_ctrl->bridge_intf.link_hdl,
+		o_ctrl->bridge_intf.session_hdl,
+		o_ctrl->ois_name, rc);
 }
 
 static void cam_ois_destroy_device_handle_locked(struct cam_ois_ctrl_t *o_ctrl,
@@ -68,7 +53,7 @@ static void cam_ois_destroy_device_handle_locked(struct cam_ois_ctrl_t *o_ctrl,
 
 	rc = cam_destroy_device_hdl(o_ctrl->bridge_intf.device_hdl);
 	if (rc < 0)
-		pr_warn("venus_cam: ois destroy handle failed reason:%s slot:%d hdl:0x%x rc:%d\n",
+		pr_debug("venus_cam: ois destroy handle failed reason:%s slot:%d hdl:0x%x rc:%d\n",
 			reason, o_ctrl->soc_info.index,
 			o_ctrl->bridge_intf.device_hdl, rc);
 
@@ -213,7 +198,7 @@ static int cam_ois_power_up(struct cam_ois_ctrl_t *o_ctrl)
 	power_info = &soc_private->power_info;
 
 	if (o_ctrl->power_on) {
-		pr_warn("venus_cam: ois power_up skipped, already on slot:%d state:%d name:%s\n",
+		pr_debug("venus_cam: ois power_up skipped, already on slot:%d state:%d name:%s\n",
 			o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
 			o_ctrl->ois_name);
 		return 0;
@@ -310,7 +295,7 @@ static int cam_ois_power_down(struct cam_ois_ctrl_t *o_ctrl)
 	}
 
 	if (!o_ctrl->power_on) {
-		pr_warn("venus_cam: ois power_down skipped, already off slot:%d state:%d name:%s\n",
+		pr_debug("venus_cam: ois power_down skipped, already off slot:%d state:%d name:%s\n",
 			o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
 			o_ctrl->ois_name);
 		return 0;
@@ -426,7 +411,7 @@ static int cam_ois_apply_settings(struct cam_ois_ctrl_t *o_ctrl,
 					if (rc < 0) {
 						CAM_ERR(CAM_OIS,
 							"i2c poll apply setting Fail");
-						pr_err("venus_cam: ois poll timeout slot:%d name:%s addr:0x%x expected:0x%x mask:0x%x addr_type:%d data_type:%d delay:%d rc:%d\n",
+						pr_debug("venus_cam: ois poll timeout slot:%d name:%s addr:0x%x expected:0x%x mask:0x%x addr_type:%d data_type:%d delay:%d rc:%d\n",
 							o_ctrl->soc_info.index, o_ctrl->ois_name,
 							i2c_list->i2c_settings.reg_setting[i].reg_addr,
 							i2c_list->i2c_settings.reg_setting[i].reg_data,
@@ -473,7 +458,7 @@ static int cam_ois_slaveInfo_pkt_parser(struct cam_ois_ctrl_t *o_ctrl,
 			if (len >= sizeof(*ois_info))
 				raw_post_init = ois_info->is_ois_post_init;
 			if (raw_post_init > 1) {
-				pr_warn("venus_cam: ois ignore invalid post_init flag slot:%d name:%s raw:%u, legacy ABI\n",
+				pr_debug("venus_cam: ois ignore invalid post_init flag slot:%d name:%s raw:%u, legacy ABI\n",
 					o_ctrl->soc_info.index,
 					o_ctrl->ois_name, raw_post_init);
 				o_ctrl->is_ois_post_init = 0;
@@ -1137,7 +1122,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			rc = cam_ois_apply_settings(o_ctrl,
 				&o_ctrl->i2c_pre_init_data);
 			if (rc) {
-				pr_err("venus_cam: ois apply pre_init failed slot:%d name:%s rc:%d\n",
+				pr_debug("venus_cam: ois apply pre_init failed slot:%d name:%s rc:%d\n",
 					o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
 				CAM_ERR(CAM_OIS, "Cannot apply pre init data");
 				goto pwr_dwn;
@@ -1164,7 +1149,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 				&o_ctrl->i2c_init_data);
 		}
 		if (rc < 0) {
-			pr_err("venus_cam: ois apply init failed slot:%d name:%s rc:%d\n",
+			pr_debug("venus_cam: ois apply init failed slot:%d name:%s rc:%d\n",
 				o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
 			CAM_ERR(CAM_OIS,
 				"Cannot apply Init settings: rc = %d",
@@ -1178,7 +1163,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			rc = cam_ois_apply_settings(o_ctrl,
 				&o_ctrl->i2c_calib_data);
 			if (rc) {
-				pr_err("venus_cam: ois apply calib failed slot:%d name:%s rc:%d\n",
+				pr_debug("venus_cam: ois apply calib failed slot:%d name:%s rc:%d\n",
 					o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
 				CAM_ERR(CAM_OIS, "Cannot apply calib data");
 				goto pwr_dwn;
@@ -1193,7 +1178,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			rc = cam_ois_apply_settings(o_ctrl,
 				&o_ctrl->i2c_post_init_data);
 			if (rc) {
-				pr_err("venus_cam: ois apply post_init failed slot:%d name:%s rc:%d\n",
+				pr_debug("venus_cam: ois apply post_init failed slot:%d name:%s rc:%d\n",
 					o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
 				CAM_ERR(CAM_OIS, "Cannot apply post init data");
 				goto pwr_dwn;
@@ -1493,7 +1478,7 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			break;
 		case CAM_RELEASE_DEV:
 			if (o_ctrl->cam_ois_state == CAM_OIS_START) {
-				pr_warn("venus_cam: ois release while START, forcing cleanup slot:%d name:%s\n",
+				pr_debug("venus_cam: ois release while START, forcing cleanup slot:%d name:%s\n",
 					o_ctrl->soc_info.index, o_ctrl->ois_name);
 				o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
 			}
@@ -1509,7 +1494,7 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			}
 
 			if (o_ctrl->bridge_intf.device_hdl == -1) {
-				pr_warn("venus_cam: ois release had no device handle slot:%d name:%s\n",
+				pr_debug("venus_cam: ois release had no device handle slot:%d name:%s\n",
 					o_ctrl->soc_info.index, o_ctrl->ois_name);
 				rc = 0;
 				goto release_idle;
@@ -1530,7 +1515,7 @@ release_idle:
 			break;
 		case CAM_STOP_DEV:
 			if (o_ctrl->cam_ois_state != CAM_OIS_START) {
-				pr_warn("venus_cam: ois stop ignored in state:%d slot:%d name:%s\n",
+				pr_debug("venus_cam: ois stop ignored in state:%d slot:%d name:%s\n",
 					o_ctrl->cam_ois_state,
 					o_ctrl->soc_info.index, o_ctrl->ois_name);
 				rc = 0;

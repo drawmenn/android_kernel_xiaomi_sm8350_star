@@ -101,7 +101,7 @@ static int gc_thread_func(void *data)
 		}
 
 #ifdef CONFIG_MACH_XIAOMI
-		boost = sbi->gc_booster;
+		boost = READ_ONCE(sbi->gc_booster);
 #endif
 
 		/*
@@ -211,6 +211,7 @@ do_gc:
 
 			if (should_break_gc(sbi))
 				break;
+			cond_resched();
 		}
 #endif
 
