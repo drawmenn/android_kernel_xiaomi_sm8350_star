@@ -106,6 +106,7 @@ struct cam_ois_intf_params {
  * @is_ois_pre_init :   flag for pre init settings
  * @i2c_pre_init_data:  ois i2c post init settings
  * @is_ois_post_init :   flag for post init settings
+ * @power_on         :   OIS power state tracked for idempotent cleanup
  *
  */
 struct cam_ois_ctrl_t {
@@ -134,6 +135,7 @@ struct cam_ois_ctrl_t {
 	struct i2c_settings_array i2c_post_init_data;
 	uint8_t is_ois_post_init;
 	//xiaomi add end
+	bool power_on;
 };
 
 /**

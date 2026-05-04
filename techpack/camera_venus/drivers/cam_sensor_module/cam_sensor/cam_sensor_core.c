@@ -106,6 +106,108 @@ static void cam_sensor_release_per_frame_resource(
 	}
 }
 
+static void cam_sensor_log_state(struct cam_sensor_ctrl_t *s_ctrl,
+	const char *tag, int rc)
+{
+	if (!s_ctrl || !s_ctrl->sensordata)
+		return;
+
+	pr_info("venus_cam: sensor %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x sensor_id:0x%x slave:0x%x rc:%d\n",
+		tag, s_ctrl->soc_info.index, s_ctrl->sensor_state,
+		s_ctrl->power_on, s_ctrl->bridge_intf.device_hdl,
+		s_ctrl->bridge_intf.link_hdl, s_ctrl->bridge_intf.session_hdl,
+		s_ctrl->sensordata->slave_info.sensor_id,
+		s_ctrl->sensordata->slave_info.sensor_slave_addr, rc);
+}
+
+static void cam_sensor_disable_sof_timer_locked(
+	struct cam_sensor_ctrl_t *s_ctrl, const char *reason)
+{
+	int rc;
+	struct cam_req_mgr_timer_notify timer;
+
+	if (!s_ctrl->bridge_intf.crm_cb ||
+		!s_ctrl->bridge_intf.crm_cb->notify_timer ||
+		s_ctrl->bridge_intf.link_hdl == -1 ||
+		s_ctrl->bridge_intf.device_hdl == -1)
+		return;
+
+	timer.link_hdl = s_ctrl->bridge_intf.link_hdl;
+	timer.dev_hdl = s_ctrl->bridge_intf.device_hdl;
+	timer.state = false;
+	rc = s_ctrl->bridge_intf.crm_cb->notify_timer(&timer);
+	if (rc)
+		pr_warn("venus_cam: sensor disable SOF timer failed reason:%s slot:%d rc:%d\n",
+			reason, s_ctrl->soc_info.index, rc);
+	else
+		pr_info("venus_cam: sensor SOF timer disabled reason:%s slot:%d\n",
+			reason, s_ctrl->soc_info.index);
+}
+
+static void cam_sensor_destroy_device_handle_locked(
+	struct cam_sensor_ctrl_t *s_ctrl, const char *reason)
+{
+	int rc;
+
+	if (s_ctrl->bridge_intf.device_hdl == -1) {
+		s_ctrl->bridge_intf.link_hdl = -1;
+		s_ctrl->bridge_intf.session_hdl = -1;
+		s_ctrl->bridge_intf.crm_cb = NULL;
+		return;
+	}
+
+	rc = cam_destroy_device_hdl(s_ctrl->bridge_intf.device_hdl);
+	if (rc < 0)
+		pr_warn("venus_cam: sensor destroy handle failed reason:%s slot:%d hdl:0x%x rc:%d\n",
+			reason, s_ctrl->soc_info.index,
+			s_ctrl->bridge_intf.device_hdl, rc);
+
+	s_ctrl->bridge_intf.device_hdl = -1;
+	s_ctrl->bridge_intf.link_hdl = -1;
+	s_ctrl->bridge_intf.session_hdl = -1;
+	s_ctrl->bridge_intf.crm_cb = NULL;
+}
+
+static void cam_sensor_reset_stream_state_locked(struct cam_sensor_ctrl_t *s_ctrl)
+{
+	cam_sensor_release_per_frame_resource(s_ctrl);
+	cam_sensor_release_stream_rsc(s_ctrl);
+	s_ctrl->streamon_count = 0;
+	s_ctrl->streamoff_count = 0;
+	s_ctrl->last_flush_req = 0;
+}
+
+static void cam_sensor_recover_stream_failure_locked(
+	struct cam_sensor_ctrl_t *s_ctrl, const char *reason, int fail_rc)
+{
+	int rc;
+
+	cam_sensor_log_state(s_ctrl, reason, fail_rc);
+	cam_sensor_disable_sof_timer_locked(s_ctrl, reason);
+
+	if (s_ctrl->i2c_data.streamoff_settings.is_settings_valid &&
+		s_ctrl->i2c_data.streamoff_settings.request_id == 0) {
+		rc = cam_sensor_apply_settings(s_ctrl, 0,
+			CAM_SENSOR_PACKET_OPCODE_SENSOR_STREAMOFF);
+		if (rc < 0)
+			pr_warn("venus_cam: sensor recovery streamoff failed reason:%s slot:%d rc:%d\n",
+				reason, s_ctrl->soc_info.index, rc);
+	}
+
+	cam_sensor_reset_stream_state_locked(s_ctrl);
+
+	if (s_ctrl->power_on) {
+		rc = cam_sensor_power_down(s_ctrl);
+		if (rc < 0)
+			pr_warn("venus_cam: sensor recovery powerdown failed reason:%s slot:%d rc:%d\n",
+				reason, s_ctrl->soc_info.index, rc);
+	}
+
+	s_ctrl->sensor_state = (s_ctrl->bridge_intf.device_hdl == -1) ?
+		CAM_SENSOR_INIT : CAM_SENSOR_ACQUIRE;
+	cam_sensor_log_state(s_ctrl, "recovery_done", fail_rc);
+}
+
 static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	void *arg)
 {
@@ -652,8 +754,10 @@ void cam_sensor_shutdown(struct cam_sensor_ctrl_t *s_ctrl)
 	int rc = 0;
 
 	if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) &&
-		(s_ctrl->is_probe_succeed == 0))
+		(s_ctrl->is_probe_succeed == 0) && !s_ctrl->power_on)
 		return;
+
+	cam_sensor_log_state(s_ctrl, "shutdown", 0);
 
 	cam_sensor_release_stream_rsc(s_ctrl);
 	cam_sensor_release_per_frame_resource(s_ctrl);
@@ -869,13 +973,14 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		s_ctrl->sensor_state = CAM_SENSOR_INIT;
 	}
 		break;
-	case CAM_ACQUIRE_DEV: {
-		struct cam_sensor_acquire_dev sensor_acq_dev;
-		struct cam_create_dev_hdl bridge_params;
+		case CAM_ACQUIRE_DEV: {
+			struct cam_sensor_acquire_dev sensor_acq_dev;
+			struct cam_create_dev_hdl bridge_params;
 
-		if ((s_ctrl->is_probe_succeed == 0) ||
-			(s_ctrl->sensor_state != CAM_SENSOR_INIT)) {
-			CAM_WARN(CAM_SENSOR,
+			cam_sensor_log_state(s_ctrl, "acquire_begin", 0);
+			if ((s_ctrl->is_probe_succeed == 0) ||
+				(s_ctrl->sensor_state != CAM_SENSOR_INIT)) {
+				CAM_WARN(CAM_SENSOR,
 				"Not in right state to aquire %d",
 				s_ctrl->sensor_state);
 			rc = -EINVAL;
@@ -914,19 +1019,23 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 
 		CAM_DBG(CAM_SENSOR, "Device Handle: %d",
 			sensor_acq_dev.device_handle);
-		if (copy_to_user(u64_to_user_ptr(cmd->handle),
-			&sensor_acq_dev,
-			sizeof(struct cam_sensor_acquire_dev))) {
-			CAM_ERR(CAM_SENSOR, "Failed Copy to User");
-			rc = -EFAULT;
-			goto release_mutex;
-		}
+			if (copy_to_user(u64_to_user_ptr(cmd->handle),
+				&sensor_acq_dev,
+				sizeof(struct cam_sensor_acquire_dev))) {
+				CAM_ERR(CAM_SENSOR, "Failed Copy to User");
+				rc = -EFAULT;
+				cam_sensor_destroy_device_handle_locked(s_ctrl,
+					"acquire_copy_to_user_fail");
+				goto release_mutex;
+			}
 
-		rc = cam_sensor_power_up(s_ctrl);
-		if (rc < 0) {
-			CAM_ERR(CAM_SENSOR, "Sensor Power up failed");
-			goto release_mutex;
-		}
+			rc = cam_sensor_power_up(s_ctrl);
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR, "Sensor Power up failed");
+				cam_sensor_destroy_device_handle_locked(s_ctrl,
+					"acquire_power_up_fail");
+				goto release_mutex;
+			}
 
 #if IS_ENABLED(CONFIG_ISPV2_AL6021)
 		if (sensor_acq_dev.reserved == CAM_RESERVED_POWERUP_EX) {
@@ -934,74 +1043,91 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			CAM_INFO(CAM_SENSOR,
 					"CAM_ACQUIRE_DEV Success, reserved %x", sensor_acq_dev.reserved);
 
-			rc = cam_sensor_power_up_extra(s_ctrl);
-			if (rc < 0) {
-				CAM_ERR(CAM_SENSOR, "Sensor Power up Extra failed");
-				goto release_mutex;
+				rc = cam_sensor_power_up_extra(s_ctrl);
+				if (rc < 0) {
+					CAM_ERR(CAM_SENSOR, "Sensor Power up Extra failed");
+					cam_sensor_power_down(s_ctrl);
+					cam_sensor_destroy_device_handle_locked(s_ctrl,
+						"acquire_power_up_extra_fail");
+					goto release_mutex;
+				}
 			}
-		}
 #endif
 
 		s_ctrl->sensor_state = CAM_SENSOR_ACQUIRE;
 		s_ctrl->last_flush_req = 0;
-		CAM_INFO(CAM_SENSOR,
-			"CAM_ACQUIRE_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
-			s_ctrl->sensordata->slave_info.sensor_id,
-			s_ctrl->sensordata->slave_info.sensor_slave_addr);
-	}
-		break;
-	case CAM_RELEASE_DEV: {
-		if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) ||
-			(s_ctrl->sensor_state == CAM_SENSOR_START)) {
-			rc = -EINVAL;
-			CAM_WARN(CAM_SENSOR,
-			"Not in right state to release : %d",
-			s_ctrl->sensor_state);
-			goto release_mutex;
+			CAM_INFO(CAM_SENSOR,
+				"CAM_ACQUIRE_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
+				s_ctrl->sensordata->slave_info.sensor_id,
+				s_ctrl->sensordata->slave_info.sensor_slave_addr);
+			cam_sensor_log_state(s_ctrl, "acquire_done", rc);
 		}
+			break;
+		case CAM_RELEASE_DEV: {
+			cam_sensor_log_state(s_ctrl, "release_begin", 0);
+			if (s_ctrl->sensor_state == CAM_SENSOR_START) {
+				pr_warn("venus_cam: sensor release while START, forcing stream cleanup slot:%d\n",
+					s_ctrl->soc_info.index);
+				cam_sensor_recover_stream_failure_locked(s_ctrl,
+					"release_from_start", 0);
+			}
 
-		if (s_ctrl->bridge_intf.link_hdl != -1) {
-			CAM_ERR(CAM_SENSOR,
-				"Device [%d] still active on link 0x%x",
-				s_ctrl->sensor_state,
-				s_ctrl->bridge_intf.link_hdl);
-			rc = -EAGAIN;
-			goto release_mutex;
-		}
+			if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) &&
+				(s_ctrl->bridge_intf.device_hdl == -1) &&
+				!s_ctrl->power_on) {
+				pr_info("venus_cam: sensor release ignored, already idle slot:%d\n",
+					s_ctrl->soc_info.index);
+				rc = 0;
+				goto release_mutex;
+			}
 
-		rc = cam_sensor_power_down(s_ctrl);
-		if (rc < 0) {
-			CAM_ERR(CAM_SENSOR, "Sensor Power Down failed");
-			goto release_mutex;
-		}
+			if (s_ctrl->bridge_intf.link_hdl != -1) {
+				pr_warn("venus_cam: sensor release forcing stale link cleanup state:%d link:0x%x slot:%d\n",
+					s_ctrl->sensor_state,
+					s_ctrl->bridge_intf.link_hdl,
+					s_ctrl->soc_info.index);
+				cam_sensor_disable_sof_timer_locked(s_ctrl,
+					"release_stale_link");
+				s_ctrl->bridge_intf.link_hdl = -1;
+				s_ctrl->bridge_intf.crm_cb = NULL;
+			}
 
-		cam_sensor_release_per_frame_resource(s_ctrl);
-		cam_sensor_release_stream_rsc(s_ctrl);
-		if (s_ctrl->bridge_intf.device_hdl == -1) {
-			CAM_ERR(CAM_SENSOR,
-				"Invalid Handles: link hdl: %d device hdl: %d",
-				s_ctrl->bridge_intf.device_hdl,
-				s_ctrl->bridge_intf.link_hdl);
-			rc = -EINVAL;
-			goto release_mutex;
-		}
-		rc = cam_destroy_device_hdl(s_ctrl->bridge_intf.device_hdl);
-		if (rc < 0)
-			CAM_ERR(CAM_SENSOR,
-				"failed in destroying the device hdl");
-		s_ctrl->bridge_intf.device_hdl = -1;
-		s_ctrl->bridge_intf.link_hdl = -1;
-		s_ctrl->bridge_intf.session_hdl = -1;
+			if (s_ctrl->power_on) {
+				rc = cam_sensor_power_down(s_ctrl);
+				if (rc < 0) {
+					CAM_ERR(CAM_SENSOR, "Sensor Power Down failed");
+					goto release_mutex;
+				}
+			}
 
-		s_ctrl->sensor_state = CAM_SENSOR_INIT;
-		CAM_INFO(CAM_SENSOR,
+			cam_sensor_release_per_frame_resource(s_ctrl);
+			cam_sensor_release_stream_rsc(s_ctrl);
+			if (s_ctrl->bridge_intf.device_hdl == -1) {
+				pr_warn("venus_cam: sensor release had no device handle slot:%d\n",
+					s_ctrl->soc_info.index);
+				rc = 0;
+				goto release_idle;
+			}
+			rc = cam_destroy_device_hdl(s_ctrl->bridge_intf.device_hdl);
+			if (rc < 0)
+				CAM_ERR(CAM_SENSOR,
+					"failed in destroying the device hdl");
+			s_ctrl->bridge_intf.device_hdl = -1;
+release_idle:
+			s_ctrl->bridge_intf.link_hdl = -1;
+			s_ctrl->bridge_intf.session_hdl = -1;
+			s_ctrl->bridge_intf.crm_cb = NULL;
+
+			s_ctrl->sensor_state = CAM_SENSOR_INIT;
+			CAM_INFO(CAM_SENSOR,
 			"CAM_RELEASE_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
 			s_ctrl->sensordata->slave_info.sensor_id,
 			s_ctrl->sensordata->slave_info.sensor_slave_addr);
-		s_ctrl->streamon_count = 0;
-		s_ctrl->streamoff_count = 0;
-		s_ctrl->last_flush_req = 0;
-	}
+			s_ctrl->streamon_count = 0;
+			s_ctrl->streamoff_count = 0;
+			s_ctrl->last_flush_req = 0;
+			cam_sensor_log_state(s_ctrl, "release_done", rc);
+		}
 		break;
 	case CAM_QUERY_CAP: {
 		struct  cam_sensor_query_cap sensor_cap;
@@ -1015,11 +1141,12 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 		break;
 	}
-	case CAM_START_DEV: {
-		struct cam_req_mgr_timer_notify timer;
-		if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) ||
-			(s_ctrl->sensor_state == CAM_SENSOR_START)) {
-			rc = -EINVAL;
+		case CAM_START_DEV: {
+			struct cam_req_mgr_timer_notify timer;
+			cam_sensor_log_state(s_ctrl, "start_begin", 0);
+			if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) ||
+				(s_ctrl->sensor_state == CAM_SENSOR_START)) {
+				rc = -EINVAL;
 			CAM_WARN(CAM_SENSOR,
 			"Not in right state to start : %d",
 			s_ctrl->sensor_state);
@@ -1030,12 +1157,14 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			(s_ctrl->i2c_data.streamon_settings.request_id == 0)) {
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
 				CAM_SENSOR_PACKET_OPCODE_SENSOR_STREAMON);
-			if (rc < 0) {
-				CAM_ERR(CAM_SENSOR,
-					"cannot apply streamon settings");
-				goto release_mutex;
+				if (rc < 0) {
+					CAM_ERR(CAM_SENSOR,
+						"cannot apply streamon settings");
+					cam_sensor_recover_stream_failure_locked(s_ctrl,
+						"streamon_fail", rc);
+					goto release_mutex;
+				}
 			}
-		}
 		s_ctrl->sensor_state = CAM_SENSOR_START;
 		if (s_ctrl->bridge_intf.crm_cb &&
 			s_ctrl->bridge_intf.crm_cb->notify_timer) {
@@ -1044,46 +1173,51 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			timer.state = true;
 			rc = s_ctrl->bridge_intf.crm_cb->notify_timer(&timer);
 			if (rc) {
-				CAM_ERR(CAM_SENSOR,
-					"Enable CRM SOF freeze timer failed rc: %d",
-					rc);
-				return rc;
+					CAM_ERR(CAM_SENSOR,
+						"Enable CRM SOF freeze timer failed rc: %d",
+						rc);
+					cam_sensor_recover_stream_failure_locked(s_ctrl,
+						"notify_timer_fail", rc);
+					goto release_mutex;
+				}
 			}
-		}
 
 		CAM_INFO(CAM_SENSOR,
-			"CAM_START_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
-			s_ctrl->sensordata->slave_info.sensor_id,
-			s_ctrl->sensordata->slave_info.sensor_slave_addr);
-	}
-		break;
-	case CAM_STOP_DEV: {
-		if (s_ctrl->sensor_state != CAM_SENSOR_START) {
-			rc = -EINVAL;
-			CAM_WARN(CAM_SENSOR,
-			"Not in right state to stop : %d",
-			s_ctrl->sensor_state);
-			goto release_mutex;
+				"CAM_START_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
+				s_ctrl->sensordata->slave_info.sensor_id,
+				s_ctrl->sensordata->slave_info.sensor_slave_addr);
+			cam_sensor_log_state(s_ctrl, "start_done", rc);
 		}
+			break;
+		case CAM_STOP_DEV: {
+			if (s_ctrl->sensor_state != CAM_SENSOR_START) {
+				rc = 0;
+				pr_warn("venus_cam: sensor stop ignored in state:%d slot:%d\n",
+					s_ctrl->sensor_state, s_ctrl->soc_info.index);
+				goto release_mutex;
+			}
+			cam_sensor_log_state(s_ctrl, "stop_begin", 0);
 
-		if (s_ctrl->i2c_data.streamoff_settings.is_settings_valid &&
-			(s_ctrl->i2c_data.streamoff_settings.request_id == 0)) {
+			if (s_ctrl->i2c_data.streamoff_settings.is_settings_valid &&
+				(s_ctrl->i2c_data.streamoff_settings.request_id == 0)) {
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
 				CAM_SENSOR_PACKET_OPCODE_SENSOR_STREAMOFF);
 			if (rc < 0) {
 				CAM_ERR(CAM_SENSOR,
 				"cannot apply streamoff settings");
 			}
-		}
+			}
 
-		cam_sensor_release_per_frame_resource(s_ctrl);
-		s_ctrl->last_flush_req = 0;
-		s_ctrl->sensor_state = CAM_SENSOR_ACQUIRE;
+			cam_sensor_disable_sof_timer_locked(s_ctrl, "stop");
+			cam_sensor_release_per_frame_resource(s_ctrl);
+			s_ctrl->last_flush_req = 0;
+			s_ctrl->sensor_state = CAM_SENSOR_ACQUIRE;
 		CAM_INFO(CAM_SENSOR,
-			"CAM_STOP_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
-			s_ctrl->sensordata->slave_info.sensor_id,
-			s_ctrl->sensordata->slave_info.sensor_slave_addr);
-	}
+				"CAM_STOP_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
+				s_ctrl->sensordata->slave_info.sensor_id,
+				s_ctrl->sensordata->slave_info.sensor_slave_addr);
+			cam_sensor_log_state(s_ctrl, "stop_done", rc);
+		}
 		break;
 	case CAM_CONFIG_DEV: {
 		rc = cam_sensor_i2c_pkt_parse(s_ctrl, arg);
@@ -1279,6 +1413,14 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 		return -EINVAL;
 	}
 
+	if (s_ctrl->power_on) {
+		pr_warn("venus_cam: sensor power_up skipped, already on slot:%d state:%d\n",
+			s_ctrl->soc_info.index, s_ctrl->sensor_state);
+		return 0;
+	}
+
+	cam_sensor_log_state(s_ctrl, "power_up_begin", 0);
+
 	if (s_ctrl->bob_pwm_switch) {
 		rc = cam_sensor_bob_pwm_mode_switch(soc_info,
 			s_ctrl->bob_reg_index, true);
@@ -1301,10 +1443,13 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 		goto cci_failure;
 	}
 
+	s_ctrl->power_on = true;
+	cam_sensor_log_state(s_ctrl, "power_up_done", rc);
 	return rc;
 cci_failure:
 	if (cam_sensor_util_power_down(power_info, soc_info))
 		CAM_ERR(CAM_SENSOR, "power down failure");
+	s_ctrl->power_on = false;
 
 	return rc;
 
@@ -1360,6 +1505,14 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 		CAM_ERR(CAM_SENSOR, "failed: power_info %pK", power_info);
 		return -EINVAL;
 	}
+
+	if (!s_ctrl->power_on) {
+		pr_warn("venus_cam: sensor power_down skipped, already off slot:%d state:%d\n",
+			s_ctrl->soc_info.index, s_ctrl->sensor_state);
+		return 0;
+	}
+
+	cam_sensor_log_state(s_ctrl, "power_down_begin", 0);
 	rc = cam_sensor_util_power_down(power_info, soc_info);
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power down the core is failed:%d", rc);
@@ -1377,6 +1530,8 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 	}
 
 	camera_io_release(&(s_ctrl->io_master_info));
+	s_ctrl->power_on = false;
+	cam_sensor_log_state(s_ctrl, "power_down_done", rc);
 
 	return rc;
 }
@@ -1533,6 +1688,9 @@ int32_t cam_sensor_apply_request(struct cam_req_mgr_apply_request *apply)
 	mutex_lock(&(s_ctrl->cam_sensor_mutex));
 	rc = cam_sensor_apply_settings(s_ctrl, apply->request_id,
 		opcode);
+	if (rc < 0 && s_ctrl->sensor_state == CAM_SENSOR_START)
+		cam_sensor_recover_stream_failure_locked(s_ctrl,
+			"apply_request_fail", rc);
 	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
 	return rc;
 }
@@ -1560,8 +1718,43 @@ int32_t cam_sensor_notify_frame_skip(struct cam_req_mgr_apply_request *apply)
 	mutex_lock(&(s_ctrl->cam_sensor_mutex));
 	rc = cam_sensor_apply_settings(s_ctrl, apply->request_id,
 		opcode);
+	if (rc < 0 && s_ctrl->sensor_state == CAM_SENSOR_START)
+		cam_sensor_recover_stream_failure_locked(s_ctrl,
+			"frame_skip_fail", rc);
 	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
 	return rc;
+}
+
+int cam_sensor_process_evt(struct cam_req_mgr_link_evt_data *event_data)
+{
+	struct cam_sensor_ctrl_t *s_ctrl = NULL;
+
+	if (!event_data)
+		return -EINVAL;
+
+	s_ctrl = (struct cam_sensor_ctrl_t *)
+		cam_get_device_priv(event_data->dev_hdl);
+	if (!s_ctrl) {
+		pr_warn("venus_cam: sensor event has no device priv dev:0x%x evt:%d req:%llu\n",
+			event_data->dev_hdl, event_data->evt_type,
+			event_data->req_id);
+		return -EINVAL;
+	}
+
+	mutex_lock(&(s_ctrl->cam_sensor_mutex));
+	pr_info("venus_cam: sensor event slot:%d evt:%d req:%llu err:%d state:%d power:%d dev:0x%x link:0x%x\n",
+		s_ctrl->soc_info.index, event_data->evt_type,
+		event_data->req_id, event_data->u.error,
+		s_ctrl->sensor_state, s_ctrl->power_on,
+		s_ctrl->bridge_intf.device_hdl,
+		s_ctrl->bridge_intf.link_hdl);
+
+	if (event_data->evt_type == CAM_REQ_MGR_LINK_EVT_SOF_FREEZE)
+		cam_sensor_recover_stream_failure_locked(s_ctrl,
+			"crm_sof_freeze", -ETIMEDOUT);
+
+	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
+	return 0;
 }
 
 int32_t cam_sensor_flush_request(struct cam_req_mgr_flush_request *flush_req)

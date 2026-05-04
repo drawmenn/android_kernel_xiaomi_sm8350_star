@@ -230,6 +230,7 @@ static int32_t cam_sensor_driver_i2c_probe(struct i2c_client *client,
 	s_ctrl->bridge_intf.ops.notify_frame_skip =
 		cam_sensor_notify_frame_skip;
 	s_ctrl->bridge_intf.ops.flush_req = cam_sensor_flush_request;
+	s_ctrl->bridge_intf.ops.process_evt = cam_sensor_process_evt;
 
 	s_ctrl->sensordata->power_info.dev = soc_info->dev;
 
@@ -320,6 +321,7 @@ static int cam_sensor_component_bind(struct device *dev,
 	s_ctrl->bridge_intf.ops.notify_frame_skip =
 		cam_sensor_notify_frame_skip;
 	s_ctrl->bridge_intf.ops.flush_req = cam_sensor_flush_request;
+	s_ctrl->bridge_intf.ops.process_evt = cam_sensor_process_evt;
 
 	s_ctrl->sensordata->power_info.dev = &pdev->dev;
 	platform_set_drvdata(pdev, s_ctrl);

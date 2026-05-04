@@ -71,6 +71,13 @@ int cam_sensor_notify_frame_skip(struct cam_req_mgr_apply_request *apply);
 int cam_sensor_flush_request(struct cam_req_mgr_flush_request *flush);
 
 /**
+ * @event_data: Req mgr event structure
+ *
+ * This API handles CRM events for sensor recovery.
+ */
+int cam_sensor_process_evt(struct cam_req_mgr_link_evt_data *event_data);
+
+/**
  * @info: Sub device info to req mgr
  *
  * Publish the subdevice info

@@ -7,6 +7,7 @@
 #include <linux/module.h>
 #include <linux/firmware.h>
 #include <linux/dma-contiguous.h>
+#include <linux/string.h>
 #include <cam_sensor_cmn_header.h>
 #include "cam_ois_core.h"
 #include "cam_ois_soc.h"
@@ -21,6 +22,92 @@
 
 static int oisfwctrl;
 module_param(oisfwctrl, int, 0644);
+
+#define CAM_OIS_INFO_LEGACY_SIZE \
+	offsetof(struct cam_cmd_ois_info, is_ois_post_init)
+
+static bool cam_ois_log_state_is_key(const char *tag)
+{
+	return strstr(tag, "fail") ||
+		!strncmp(tag, "power_", strlen("power_")) ||
+		!strncmp(tag, "release_", strlen("release_"));
+}
+
+static void cam_ois_log_state(struct cam_ois_ctrl_t *o_ctrl,
+	const char *tag, int rc)
+{
+	if (!o_ctrl)
+		return;
+
+	if (cam_ois_log_state_is_key(tag))
+		pr_info("venus_cam: ois %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x name:%s rc:%d\n",
+			tag, o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
+			o_ctrl->power_on, o_ctrl->bridge_intf.device_hdl,
+			o_ctrl->bridge_intf.link_hdl,
+			o_ctrl->bridge_intf.session_hdl,
+			o_ctrl->ois_name, rc);
+	else
+		pr_debug("venus_cam: ois %s slot:%d state:%d power:%d dev:0x%x link:0x%x session:0x%x name:%s rc:%d\n",
+			tag, o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
+			o_ctrl->power_on, o_ctrl->bridge_intf.device_hdl,
+			o_ctrl->bridge_intf.link_hdl,
+			o_ctrl->bridge_intf.session_hdl,
+			o_ctrl->ois_name, rc);
+}
+
+static void cam_ois_destroy_device_handle_locked(struct cam_ois_ctrl_t *o_ctrl,
+	const char *reason)
+{
+	int rc;
+
+	if (o_ctrl->bridge_intf.device_hdl == -1) {
+		o_ctrl->bridge_intf.link_hdl = -1;
+		o_ctrl->bridge_intf.session_hdl = -1;
+		return;
+	}
+
+	rc = cam_destroy_device_hdl(o_ctrl->bridge_intf.device_hdl);
+	if (rc < 0)
+		pr_warn("venus_cam: ois destroy handle failed reason:%s slot:%d hdl:0x%x rc:%d\n",
+			reason, o_ctrl->soc_info.index,
+			o_ctrl->bridge_intf.device_hdl, rc);
+
+	o_ctrl->bridge_intf.device_hdl = -1;
+	o_ctrl->bridge_intf.link_hdl = -1;
+	o_ctrl->bridge_intf.session_hdl = -1;
+}
+
+static void cam_ois_release_settings_locked(struct cam_ois_ctrl_t *o_ctrl)
+{
+	if (o_ctrl->i2c_mode_data.is_settings_valid == 1)
+		delete_request(&o_ctrl->i2c_mode_data);
+
+	if (o_ctrl->i2c_calib_data.is_settings_valid == 1)
+		delete_request(&o_ctrl->i2c_calib_data);
+
+	if (o_ctrl->i2c_init_data.is_settings_valid == 1)
+		delete_request(&o_ctrl->i2c_init_data);
+
+	if (o_ctrl->i2c_pre_init_data.is_settings_valid == 1)
+		delete_request(&o_ctrl->i2c_pre_init_data);
+
+	if (o_ctrl->i2c_post_init_data.is_settings_valid == 1)
+		delete_request(&o_ctrl->i2c_post_init_data);
+}
+
+static void cam_ois_free_power_settings_locked(struct cam_ois_ctrl_t *o_ctrl)
+{
+	struct cam_ois_soc_private *soc_private =
+		(struct cam_ois_soc_private *)o_ctrl->soc_info.soc_private;
+	struct cam_sensor_power_ctrl_t *power_info = &soc_private->power_info;
+
+	kfree(power_info->power_setting);
+	kfree(power_info->power_down_setting);
+	power_info->power_setting = NULL;
+	power_info->power_down_setting = NULL;
+	power_info->power_down_setting_size = 0;
+	power_info->power_setting_size = 0;
+}
 
 int32_t cam_ois_construct_default_power_setting(
 	struct cam_sensor_power_ctrl_t *power_info)
@@ -105,8 +192,11 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 	if (copy_to_user(u64_to_user_ptr(cmd->handle), &ois_acq_dev,
 		sizeof(struct cam_sensor_acquire_dev))) {
 		CAM_ERR(CAM_OIS, "ACQUIRE_DEV: copy to user failed");
+		cam_ois_destroy_device_handle_locked(o_ctrl,
+			"acquire_copy_to_user_fail");
 		return -EFAULT;
 	}
+	cam_ois_log_state(o_ctrl, "acquire_handle_done", 0);
 	return 0;
 }
 
@@ -121,6 +211,15 @@ static int cam_ois_power_up(struct cam_ois_ctrl_t *o_ctrl)
 	soc_private =
 		(struct cam_ois_soc_private *)o_ctrl->soc_info.soc_private;
 	power_info = &soc_private->power_info;
+
+	if (o_ctrl->power_on) {
+		pr_warn("venus_cam: ois power_up skipped, already on slot:%d state:%d name:%s\n",
+			o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
+			o_ctrl->ois_name);
+		return 0;
+	}
+
+	cam_ois_log_state(o_ctrl, "power_up_begin", 0);
 
 	if ((power_info->power_setting == NULL) &&
 		(power_info->power_down_setting == NULL)) {
@@ -170,10 +269,13 @@ static int cam_ois_power_up(struct cam_ois_ctrl_t *o_ctrl)
 		goto cci_failure;
 	}
 
+	o_ctrl->power_on = true;
+	cam_ois_log_state(o_ctrl, "power_up_done", rc);
 	return rc;
 cci_failure:
 	if (cam_sensor_util_power_down(power_info, soc_info))
 		CAM_ERR(CAM_OIS, "Power Down failed");
+	o_ctrl->power_on = false;
 
 	return rc;
 }
@@ -207,6 +309,15 @@ static int cam_ois_power_down(struct cam_ois_ctrl_t *o_ctrl)
 		return -EINVAL;
 	}
 
+	if (!o_ctrl->power_on) {
+		pr_warn("venus_cam: ois power_down skipped, already off slot:%d state:%d name:%s\n",
+			o_ctrl->soc_info.index, o_ctrl->cam_ois_state,
+			o_ctrl->ois_name);
+		return 0;
+	}
+
+	cam_ois_log_state(o_ctrl, "power_down_begin", 0);
+
 	rc = cam_sensor_util_power_down(power_info, soc_info);
 	if (rc) {
 		CAM_ERR(CAM_OIS, "power down the core is failed:%d", rc);
@@ -214,6 +325,8 @@ static int cam_ois_power_down(struct cam_ois_ctrl_t *o_ctrl)
 	}
 
 	camera_io_release(&o_ctrl->io_master_info);
+	o_ctrl->power_on = false;
+	cam_ois_log_state(o_ctrl, "power_down_done", rc);
 
 	return rc;
 }
@@ -310,11 +423,20 @@ static int cam_ois_apply_settings(struct cam_ois_ctrl_t *o_ctrl,
 				i2c_list->i2c_settings.addr_type,
 				i2c_list->i2c_settings.data_type,
 				i2c_list->i2c_settings.reg_setting[i].delay);
-				if (rc < 0) {
-					CAM_ERR(CAM_OIS,
-						"i2c poll apply setting Fail");
-					return rc;
-				}
+					if (rc < 0) {
+						CAM_ERR(CAM_OIS,
+							"i2c poll apply setting Fail");
+						pr_err("venus_cam: ois poll timeout slot:%d name:%s addr:0x%x expected:0x%x mask:0x%x addr_type:%d data_type:%d delay:%d rc:%d\n",
+							o_ctrl->soc_info.index, o_ctrl->ois_name,
+							i2c_list->i2c_settings.reg_setting[i].reg_addr,
+							i2c_list->i2c_settings.reg_setting[i].reg_data,
+							i2c_list->i2c_settings.reg_setting[i].data_mask,
+							i2c_list->i2c_settings.addr_type,
+							i2c_list->i2c_settings.data_type,
+							i2c_list->i2c_settings.reg_setting[i].delay,
+							rc);
+						return rc;
+					}
 			}
 		}
 	}
@@ -326,9 +448,11 @@ static int cam_ois_slaveInfo_pkt_parser(struct cam_ois_ctrl_t *o_ctrl,
 	uint32_t *cmd_buf, size_t len)
 {
 	int32_t rc = 0;
+	uint8_t raw_pre_init;
+	uint8_t raw_post_init = 0;
 	struct cam_cmd_ois_info *ois_info;
 
-	if (!o_ctrl || !cmd_buf || len < sizeof(struct cam_cmd_ois_info)) {
+	if (!o_ctrl || !cmd_buf || len < CAM_OIS_INFO_LEGACY_SIZE) {
 		CAM_ERR(CAM_OIS, "Invalid Args");
 		return -EINVAL;
 	}
@@ -339,23 +463,39 @@ static int cam_ois_slaveInfo_pkt_parser(struct cam_ois_ctrl_t *o_ctrl,
 			ois_info->i2c_freq_mode;
 		o_ctrl->io_master_info.cci_client->sid =
 			ois_info->slave_addr >> 1;
-		o_ctrl->ois_fw_flag = ois_info->ois_fw_flag;
-		o_ctrl->is_ois_calib = ois_info->is_ois_calib;
-		//xiaomi add begin
-		o_ctrl->is_ois_pre_init = ois_info->is_ois_pre_init;
-		o_ctrl->is_ois_post_init = ois_info->is_ois_post_init;
-		//xiaomi add end
+			o_ctrl->ois_fw_flag = ois_info->ois_fw_flag;
+			o_ctrl->is_ois_calib = ois_info->is_ois_calib;
 		memcpy(o_ctrl->ois_name, ois_info->ois_name, OIS_NAME_LEN);
 		o_ctrl->ois_name[OIS_NAME_LEN - 1] = '\0';
+			//xiaomi add begin
+			raw_pre_init = ois_info->is_ois_pre_init;
+			o_ctrl->is_ois_pre_init = raw_pre_init ? 1 : 0;
+			if (len >= sizeof(*ois_info))
+				raw_post_init = ois_info->is_ois_post_init;
+			if (raw_post_init > 1) {
+				pr_warn("venus_cam: ois ignore invalid post_init flag slot:%d name:%s raw:%u, legacy ABI\n",
+					o_ctrl->soc_info.index,
+					o_ctrl->ois_name, raw_post_init);
+				o_ctrl->is_ois_post_init = 0;
+			} else {
+				o_ctrl->is_ois_post_init = raw_post_init;
+			}
+			//xiaomi add end
 		o_ctrl->io_master_info.cci_client->retries = 3;
 		o_ctrl->io_master_info.cci_client->id_map = 0;
 		/* xiaomi add disable cci optmz for OIS by default */
-		o_ctrl->io_master_info.cci_client->disable_optmz = 1;
-		memcpy(&(o_ctrl->opcode), &(ois_info->opcode),
-			sizeof(struct cam_ois_opcode));
-		CAM_DBG(CAM_OIS, "Slave addr: 0x%x Freq Mode: %d, disable optmz %d",
-			ois_info->slave_addr, ois_info->i2c_freq_mode,
-			o_ctrl->io_master_info.cci_client->disable_optmz);
+			o_ctrl->io_master_info.cci_client->disable_optmz = 1;
+			memcpy(&(o_ctrl->opcode), &(ois_info->opcode),
+				sizeof(struct cam_ois_opcode));
+			pr_debug("venus_cam: ois slave slot:%d name:%s sid:0x%x freq:%d fw:%d calib:%d pre:%d raw_pre:%d post:%d raw_post:%d\n",
+				o_ctrl->soc_info.index, o_ctrl->ois_name,
+				ois_info->slave_addr, ois_info->i2c_freq_mode,
+				o_ctrl->ois_fw_flag, o_ctrl->is_ois_calib,
+				o_ctrl->is_ois_pre_init, raw_pre_init,
+				o_ctrl->is_ois_post_init, raw_post_init);
+			CAM_DBG(CAM_OIS, "Slave addr: 0x%x Freq Mode: %d, disable optmz %d",
+				ois_info->slave_addr, ois_info->i2c_freq_mode,
+				o_ctrl->io_master_info.cci_client->disable_optmz);
 	} else if (o_ctrl->io_master_info.master_type == I2C_MASTER) {
 		o_ctrl->io_master_info.client->addr = ois_info->slave_addr;
 		CAM_DBG(CAM_OIS, "Slave addr: 0x%x", ois_info->slave_addr);
@@ -393,6 +533,9 @@ static int cam_default_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 	snprintf(name_coeff, 32, "%s.coeff", o_ctrl->ois_name);
 	snprintf(name_prog, 32, "%s.prog", o_ctrl->ois_name);
 	snprintf(name_mem, 32, "%s.mem", o_ctrl->ois_name);
+	pr_debug("venus_cam: ois fw begin slot:%d name:%s prog:%s coeff:%s mem:%s\n",
+		o_ctrl->soc_info.index, o_ctrl->ois_name, name_prog,
+		name_coeff, name_mem);
 
 	/* cast pointer as const pointer*/
 	fw_name_prog = name_prog;
@@ -503,9 +646,10 @@ static int cam_default_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 	release_firmware(fw);
 
 	/* Load MEM, this step is not necessary for every ois, so skip load if not exist*/
-	rc = request_firmware(&fw, fw_name_mem, dev);
+	rc = request_firmware_direct(&fw, fw_name_mem, dev);
 	if (rc) {
-		CAM_ERR(CAM_OIS, "Skip to locate %s", fw_name_mem);
+		pr_debug("venus_cam: ois optional mem fw missing slot:%d name:%s rc:%d, skip\n",
+			o_ctrl->soc_info.index, fw_name_mem, rc);
 		return 0;
 	}
 
@@ -973,16 +1117,31 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			}
 			//xiaomi add end
 			break;
+				}
 			}
-		}
 
-		if (o_ctrl->cam_ois_state != CAM_OIS_CONFIG) {
-			rc = cam_ois_power_up(o_ctrl);
-			if (rc) {
+			if (o_ctrl->cam_ois_state != CAM_OIS_CONFIG) {
+				rc = cam_ois_power_up(o_ctrl);
+				if (rc) {
 				CAM_ERR(CAM_OIS, " OIS Power up failed");
 				return rc;
 			}
 			o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
+		}
+
+		if (o_ctrl->is_ois_pre_init) {
+			CAM_DBG(CAM_OIS, "apply pre init settings");
+			pr_debug("venus_cam: ois apply pre_init slot:%d name:%s flag:%u\n",
+				o_ctrl->soc_info.index, o_ctrl->ois_name,
+				o_ctrl->is_ois_pre_init);
+			rc = cam_ois_apply_settings(o_ctrl,
+				&o_ctrl->i2c_pre_init_data);
+			if (rc) {
+				pr_err("venus_cam: ois apply pre_init failed slot:%d name:%s rc:%d\n",
+					o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
+				CAM_ERR(CAM_OIS, "Cannot apply pre init data");
+				goto pwr_dwn;
+			}
 		}
 
 		if (o_ctrl->ois_fw_flag) {
@@ -993,6 +1152,8 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			}
 		}
 
+		pr_debug("venus_cam: ois apply init slot:%d name:%s\n",
+			o_ctrl->soc_info.index, o_ctrl->ois_name);
 		rc = cam_ois_apply_settings(o_ctrl, &o_ctrl->i2c_init_data);
 		if ((rc == -EAGAIN) &&
 			(o_ctrl->io_master_info.master_type == CCI_MASTER)) {
@@ -1003,6 +1164,8 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 				&o_ctrl->i2c_init_data);
 		}
 		if (rc < 0) {
+			pr_err("venus_cam: ois apply init failed slot:%d name:%s rc:%d\n",
+				o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
 			CAM_ERR(CAM_OIS,
 				"Cannot apply Init settings: rc = %d",
 				rc);
@@ -1010,30 +1173,28 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		}
 
 		if (o_ctrl->is_ois_calib) {
+			pr_debug("venus_cam: ois apply calib slot:%d name:%s\n",
+				o_ctrl->soc_info.index, o_ctrl->ois_name);
 			rc = cam_ois_apply_settings(o_ctrl,
 				&o_ctrl->i2c_calib_data);
 			if (rc) {
+				pr_err("venus_cam: ois apply calib failed slot:%d name:%s rc:%d\n",
+					o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
 				CAM_ERR(CAM_OIS, "Cannot apply calib data");
-				goto pwr_dwn;
-			}
-		}
-
-		//xiaomi add begin
-		if (o_ctrl->is_ois_pre_init) {
-			CAM_DBG(CAM_OIS, "apply pre init settings");
-			rc = cam_ois_apply_settings(o_ctrl,
-				&o_ctrl->i2c_pre_init_data);
-			if (rc) {
-				CAM_ERR(CAM_OIS, "Cannot apply pre init data");
 				goto pwr_dwn;
 			}
 		}
 
 		if (o_ctrl->is_ois_post_init) {
 			CAM_DBG(CAM_OIS, "apply post init settings");
+			pr_debug("venus_cam: ois apply post_init slot:%d name:%s flag:%u\n",
+				o_ctrl->soc_info.index, o_ctrl->ois_name,
+				o_ctrl->is_ois_post_init);
 			rc = cam_ois_apply_settings(o_ctrl,
 				&o_ctrl->i2c_post_init_data);
 			if (rc) {
+				pr_err("venus_cam: ois apply post_init failed slot:%d name:%s rc:%d\n",
+					o_ctrl->soc_info.index, o_ctrl->ois_name, rc);
 				CAM_ERR(CAM_OIS, "Cannot apply post init data");
 				goto pwr_dwn;
 			}
@@ -1066,11 +1227,11 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 				"Fail deleting Calibration data: rc: %d", rc);
 			rc = 0;
 		}
-		break;
-	case CAM_OIS_PACKET_OPCODE_OIS_CONTROL:
-		if (o_ctrl->cam_ois_state < CAM_OIS_CONFIG) {
-			rc = -EINVAL;
-			CAM_WARN(CAM_OIS,
+			break;
+			case CAM_OIS_PACKET_OPCODE_OIS_CONTROL:
+				if (o_ctrl->cam_ois_state < CAM_OIS_CONFIG) {
+					rc = -EINVAL;
+					CAM_WARN(CAM_OIS,
 				"Not in right state to control OIS: %d",
 				o_ctrl->cam_ois_state);
 			return rc;
@@ -1128,28 +1289,28 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			csl_packet->io_configs_offset);
 
 		/* validate read data io config */
-		if (io_cfg == NULL) {
-			CAM_ERR(CAM_OIS, "I/O config is invalid(NULL)");
-			rc = -EINVAL;
-			return rc;
-		}
+			if (io_cfg == NULL) {
+				CAM_ERR(CAM_OIS, "I/O config is invalid(NULL)");
+				rc = -EINVAL;
+				return rc;
+			}
 
 		offset = (uint32_t *)&csl_packet->payload;
 		offset += (csl_packet->cmd_buf_offset / sizeof(uint32_t));
 		cmd_desc = (struct cam_cmd_buf_desc *)(offset);
 		i2c_read_settings.is_settings_valid = 1;
 		i2c_read_settings.request_id = 0;
-		rc = cam_sensor_i2c_command_parser(&o_ctrl->io_master_info,
-			&i2c_read_settings,
-			cmd_desc, 1, &io_cfg[0]);
-		if (rc < 0) {
-			CAM_ERR(CAM_OIS, "OIS read pkt parsing failed: %d", rc);
-			return rc;
-		}
+			rc = cam_sensor_i2c_command_parser(&o_ctrl->io_master_info,
+				&i2c_read_settings,
+				cmd_desc, 1, &io_cfg[0]);
+				if (rc < 0) {
+					CAM_ERR(CAM_OIS, "OIS read pkt parsing failed: %d", rc);
+					return rc;
+				}
 
-		rc = cam_sensor_i2c_read_data(
-			&i2c_read_settings,
-			&o_ctrl->io_master_info);
+				rc = cam_sensor_i2c_read_data(
+					&i2c_read_settings,
+					&o_ctrl->io_master_info);
 		if (rc < 0) {
 			CAM_ERR(CAM_OIS, "cannot read data rc: %d", rc);
 			delete_request(&i2c_read_settings);
@@ -1173,12 +1334,12 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 				"Failed in deleting the read settings");
 			return rc;
 		}
-		break;
-	}
-	case CAM_OIS_PACKET_OPCODE_WRITE_TIME: {
-		if (o_ctrl->cam_ois_state < CAM_OIS_CONFIG) {
-			rc = -EINVAL;
-			CAM_ERR(CAM_OIS,
+			break;
+		}
+		case CAM_OIS_PACKET_OPCODE_WRITE_TIME: {
+				if (o_ctrl->cam_ois_state < CAM_OIS_CONFIG) {
+					rc = -EINVAL;
+				CAM_ERR(CAM_OIS,
 				"Not in right state to write time to OIS: %d",
 				o_ctrl->cam_ois_state);
 			return rc;
@@ -1226,6 +1387,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 	if (!rc)
 		return rc;
 pwr_dwn:
+	cam_ois_log_state(o_ctrl, "config_fail_cleanup", rc);
 	cam_ois_power_down(o_ctrl);
 	return rc;
 }
@@ -1233,54 +1395,26 @@ pwr_dwn:
 void cam_ois_shutdown(struct cam_ois_ctrl_t *o_ctrl)
 {
 	int rc = 0;
-	struct cam_ois_soc_private *soc_private =
-		(struct cam_ois_soc_private *)o_ctrl->soc_info.soc_private;
-	struct cam_sensor_power_ctrl_t *power_info = &soc_private->power_info;
 
-	if (o_ctrl->cam_ois_state == CAM_OIS_INIT)
+	if (o_ctrl->cam_ois_state == CAM_OIS_INIT && !o_ctrl->power_on)
 		return;
 
-	if (o_ctrl->cam_ois_state >= CAM_OIS_CONFIG) {
+	cam_ois_log_state(o_ctrl, "shutdown", 0);
+	if (o_ctrl->cam_ois_state >= CAM_OIS_CONFIG || o_ctrl->power_on) {
 		rc = cam_ois_power_down(o_ctrl);
 		if (rc < 0)
 			CAM_ERR(CAM_OIS, "OIS Power down failed");
 		o_ctrl->cam_ois_state = CAM_OIS_ACQUIRE;
 	}
 
-	if (o_ctrl->cam_ois_state >= CAM_OIS_ACQUIRE) {
-		rc = cam_destroy_device_hdl(o_ctrl->bridge_intf.device_hdl);
-		if (rc < 0)
-			CAM_ERR(CAM_OIS, "destroying the device hdl");
-		o_ctrl->bridge_intf.device_hdl = -1;
-		o_ctrl->bridge_intf.link_hdl = -1;
-		o_ctrl->bridge_intf.session_hdl = -1;
-	}
+	if (o_ctrl->cam_ois_state >= CAM_OIS_ACQUIRE)
+		cam_ois_destroy_device_handle_locked(o_ctrl, "shutdown");
 
-	if (o_ctrl->i2c_mode_data.is_settings_valid == 1)
-		delete_request(&o_ctrl->i2c_mode_data);
-
-	if (o_ctrl->i2c_calib_data.is_settings_valid == 1)
-		delete_request(&o_ctrl->i2c_calib_data);
-
-	if (o_ctrl->i2c_init_data.is_settings_valid == 1)
-		delete_request(&o_ctrl->i2c_init_data);
-
-	// xiaomi add begin
-	if (o_ctrl->i2c_pre_init_data.is_settings_valid == 1)
-		delete_request(&o_ctrl->i2c_pre_init_data);
-
-	if (o_ctrl->i2c_post_init_data.is_settings_valid == 1)
-		delete_request(&o_ctrl->i2c_post_init_data);
-	// xiaomi add end
-
-	kfree(power_info->power_setting);
-	kfree(power_info->power_down_setting);
-	power_info->power_setting = NULL;
-	power_info->power_down_setting = NULL;
-	power_info->power_down_setting_size = 0;
-	power_info->power_setting_size = 0;
+	cam_ois_release_settings_locked(o_ctrl);
+	cam_ois_free_power_settings_locked(o_ctrl);
 
 	o_ctrl->cam_ois_state = CAM_OIS_INIT;
+	cam_ois_log_state(o_ctrl, "shutdown_done", rc);
 }
 
 /**
@@ -1295,8 +1429,6 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 	int                              rc = 0;
 	struct cam_ois_query_cap_t       ois_cap = {0};
 	struct cam_control              *cmd = (struct cam_control *)arg;
-	struct cam_ois_soc_private      *soc_private = NULL;
-	struct cam_sensor_power_ctrl_t  *power_info = NULL;
 
 	if (!o_ctrl || !cmd) {
 		CAM_ERR(CAM_OIS, "Invalid arguments");
@@ -1309,14 +1441,10 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		return -EINVAL;
 	}
 
-	soc_private =
-		(struct cam_ois_soc_private *)o_ctrl->soc_info.soc_private;
-	power_info = &soc_private->power_info;
-
 	mutex_lock(&(o_ctrl->ois_mutex));
 	switch (cmd->op_code) {
-	case CAM_QUERY_CAP:
-		ois_cap.slot_info = o_ctrl->soc_info.index;
+		case CAM_QUERY_CAP:
+			ois_cap.slot_info = o_ctrl->soc_info.index;
 
 		if (copy_to_user(u64_to_user_ptr(cmd->handle),
 			&ois_cap,
@@ -1325,99 +1453,92 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			rc = -EFAULT;
 			goto release_mutex;
 		}
-		CAM_DBG(CAM_OIS, "ois_cap: ID: %d", ois_cap.slot_info);
-		break;
-	case CAM_ACQUIRE_DEV:
-		rc = cam_ois_get_dev_handle(o_ctrl, arg);
-		if (rc) {
-			CAM_ERR(CAM_OIS, "Failed to acquire dev");
-			goto release_mutex;
-		}
-
-		o_ctrl->cam_ois_state = CAM_OIS_ACQUIRE;
-		break;
-	case CAM_START_DEV:
-		if (o_ctrl->cam_ois_state != CAM_OIS_CONFIG) {
-			rc = -EINVAL;
-			CAM_WARN(CAM_OIS,
-			"Not in right state for start : %d",
-			o_ctrl->cam_ois_state);
-			goto release_mutex;
-		}
-		o_ctrl->cam_ois_state = CAM_OIS_START;
-		break;
-	case CAM_CONFIG_DEV:
-		rc = cam_ois_pkt_parse(o_ctrl, arg);
-		if (rc) {
-			CAM_ERR(CAM_OIS, "Failed in ois pkt Parsing");
-			goto release_mutex;
-		}
-		break;
-	case CAM_RELEASE_DEV:
-		if (o_ctrl->cam_ois_state == CAM_OIS_START) {
-			rc = -EINVAL;
-			CAM_WARN(CAM_OIS,
-				"Cant release ois: in start state");
-			goto release_mutex;
-		}
-
-		if (o_ctrl->cam_ois_state == CAM_OIS_CONFIG) {
-			rc = cam_ois_power_down(o_ctrl);
-			if (rc < 0) {
-				CAM_ERR(CAM_OIS, "OIS Power down failed");
+			CAM_DBG(CAM_OIS, "ois_cap: ID: %d", ois_cap.slot_info);
+			break;
+		case CAM_ACQUIRE_DEV:
+			cam_ois_log_state(o_ctrl, "acquire_begin", 0);
+			rc = cam_ois_get_dev_handle(o_ctrl, arg);
+			if (rc) {
+				CAM_ERR(CAM_OIS, "Failed to acquire dev");
 				goto release_mutex;
 			}
-		}
 
-		if (o_ctrl->bridge_intf.device_hdl == -1) {
-			CAM_ERR(CAM_OIS, "link hdl: %d device hdl: %d",
-				o_ctrl->bridge_intf.device_hdl,
-				o_ctrl->bridge_intf.link_hdl);
-			rc = -EINVAL;
-			goto release_mutex;
-		}
-		rc = cam_destroy_device_hdl(o_ctrl->bridge_intf.device_hdl);
-		if (rc < 0)
-			CAM_ERR(CAM_OIS, "destroying the device hdl");
-		o_ctrl->bridge_intf.device_hdl = -1;
-		o_ctrl->bridge_intf.link_hdl = -1;
-		o_ctrl->bridge_intf.session_hdl = -1;
-		o_ctrl->cam_ois_state = CAM_OIS_INIT;
-
-		kfree(power_info->power_setting);
-		kfree(power_info->power_down_setting);
-		power_info->power_setting = NULL;
-		power_info->power_down_setting = NULL;
-		power_info->power_down_setting_size = 0;
-		power_info->power_setting_size = 0;
-
-		if (o_ctrl->i2c_mode_data.is_settings_valid == 1)
-			delete_request(&o_ctrl->i2c_mode_data);
-
-		if (o_ctrl->i2c_calib_data.is_settings_valid == 1)
-			delete_request(&o_ctrl->i2c_calib_data);
-
-		if (o_ctrl->i2c_init_data.is_settings_valid == 1)
-			delete_request(&o_ctrl->i2c_init_data);
-
-		// xiaomi add begin
-		if (o_ctrl->i2c_pre_init_data.is_settings_valid == 1)
-			delete_request(&o_ctrl->i2c_pre_init_data);
-
-		if (o_ctrl->i2c_post_init_data.is_settings_valid == 1)
-			delete_request(&o_ctrl->i2c_post_init_data);
-		// xiaomi add end
-
-		break;
-	case CAM_STOP_DEV:
-		if (o_ctrl->cam_ois_state != CAM_OIS_START) {
-			rc = -EINVAL;
-			CAM_WARN(CAM_OIS,
-			"Not in right state for stop : %d",
+			o_ctrl->cam_ois_state = CAM_OIS_ACQUIRE;
+			cam_ois_log_state(o_ctrl, "acquire_done", rc);
+			break;
+		case CAM_START_DEV:
+			cam_ois_log_state(o_ctrl, "start_begin", 0);
+			if (o_ctrl->cam_ois_state != CAM_OIS_CONFIG) {
+				rc = -EINVAL;
+				CAM_WARN(CAM_OIS,
+			"Not in right state for start : %d",
 			o_ctrl->cam_ois_state);
-		}
-		o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
-		break;
+				goto release_mutex;
+			}
+			o_ctrl->cam_ois_state = CAM_OIS_START;
+			cam_ois_log_state(o_ctrl, "start_done", rc);
+			break;
+		case CAM_CONFIG_DEV:
+			cam_ois_log_state(o_ctrl, "config_begin", 0);
+			rc = cam_ois_pkt_parse(o_ctrl, arg);
+			if (rc) {
+				CAM_ERR(CAM_OIS, "Failed in ois pkt Parsing");
+				if (o_ctrl->power_on)
+					cam_ois_power_down(o_ctrl);
+				o_ctrl->cam_ois_state = CAM_OIS_ACQUIRE;
+				cam_ois_log_state(o_ctrl, "config_fail", rc);
+				goto release_mutex;
+			}
+			cam_ois_log_state(o_ctrl, "config_done", rc);
+			break;
+		case CAM_RELEASE_DEV:
+			if (o_ctrl->cam_ois_state == CAM_OIS_START) {
+				pr_warn("venus_cam: ois release while START, forcing cleanup slot:%d name:%s\n",
+					o_ctrl->soc_info.index, o_ctrl->ois_name);
+				o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
+			}
+
+			cam_ois_log_state(o_ctrl, "release_begin", 0);
+			if (o_ctrl->cam_ois_state == CAM_OIS_CONFIG ||
+				o_ctrl->power_on) {
+				rc = cam_ois_power_down(o_ctrl);
+				if (rc < 0) {
+					CAM_ERR(CAM_OIS, "OIS Power down failed");
+				goto release_mutex;
+				}
+			}
+
+			if (o_ctrl->bridge_intf.device_hdl == -1) {
+				pr_warn("venus_cam: ois release had no device handle slot:%d name:%s\n",
+					o_ctrl->soc_info.index, o_ctrl->ois_name);
+				rc = 0;
+				goto release_idle;
+			}
+			rc = cam_destroy_device_hdl(o_ctrl->bridge_intf.device_hdl);
+			if (rc < 0)
+				CAM_ERR(CAM_OIS, "destroying the device hdl");
+			o_ctrl->bridge_intf.device_hdl = -1;
+release_idle:
+			o_ctrl->bridge_intf.link_hdl = -1;
+			o_ctrl->bridge_intf.session_hdl = -1;
+			o_ctrl->cam_ois_state = CAM_OIS_INIT;
+
+			cam_ois_free_power_settings_locked(o_ctrl);
+			cam_ois_release_settings_locked(o_ctrl);
+			cam_ois_log_state(o_ctrl, "release_done", rc);
+
+			break;
+		case CAM_STOP_DEV:
+			if (o_ctrl->cam_ois_state != CAM_OIS_START) {
+				pr_warn("venus_cam: ois stop ignored in state:%d slot:%d name:%s\n",
+					o_ctrl->cam_ois_state,
+					o_ctrl->soc_info.index, o_ctrl->ois_name);
+				rc = 0;
+				break;
+			}
+			o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
+			cam_ois_log_state(o_ctrl, "stop_done", rc);
+			break;
 	case CAM_FLUSH_REQ:
 		// ignore the flush cmd
 		break;

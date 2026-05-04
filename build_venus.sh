@@ -5,25 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KPM="${KPM:-1}"
 if [[ "$KPM" =~ ^(1|y|Y|yes|YES|true|TRUE|on|ON)$ ]]; then
   KPM=1
-  DEFAULT_OUT_DIR="$ROOT_DIR/out-venus-5.4.302-kpm"
 elif [[ "$KPM" =~ ^(0|n|N|no|NO|false|FALSE|off|OFF)$ ]]; then
   KPM=0
-  DEFAULT_OUT_DIR="$ROOT_DIR/out-venus-5.4.302"
 else
   echo "ERROR: KPM must be 1 or 0" >&2
   exit 1
 fi
-OUT_DIR="${OUT_DIR:-$DEFAULT_OUT_DIR}"
 JOBS="${JOBS:-$(nproc)}"
-RECOVERY_COMPAT="${RECOVERY_COMPAT:-1}"
-if [[ "$RECOVERY_COMPAT" =~ ^(1|y|Y|yes|YES|true|TRUE|on|ON)$ ]]; then
-  RECOVERY_COMPAT=1
-elif [[ "$RECOVERY_COMPAT" =~ ^(0|n|N|no|NO|false|FALSE|off|OFF)$ ]]; then
-  RECOVERY_COMPAT=0
+if (( KPM )); then
+  DEFAULT_OUT_DIR="$ROOT_DIR/out-venus-5.4.302-kpm"
 else
-  echo "ERROR: RECOVERY_COMPAT must be 1 or 0" >&2
-  exit 1
+  DEFAULT_OUT_DIR="$ROOT_DIR/out-venus-5.4.302"
 fi
+OUT_DIR="${OUT_DIR:-$DEFAULT_OUT_DIR}"
 
 export ARCH=arm64
 export SUBARCH=arm64
@@ -96,14 +90,6 @@ if (( KPM )); then
 else
   CONFIG_ARGS+=(--disable KPM)
 fi
-if (( RECOVERY_COMPAT )); then
-  CONFIG_ARGS+=(
-    --enable DEVTMPFS
-    --enable DEVTMPFS_MOUNT
-    --disable PANIC_ON_OOPS
-    --set-val PANIC_TIMEOUT 5
-  )
-fi
 
 "$ROOT_DIR/scripts/config" --file "$OUT_DIR/.config" "${CONFIG_ARGS[@]}"
 make "${MAKE_ARGS[@]}" olddefconfig
@@ -148,18 +134,6 @@ else
     echo "ERROR: CONFIG_KPM must be disabled for this build" >&2
     exit 1
   }
-fi
-if (( RECOVERY_COMPAT )); then
-  for recovery_config in \
-    'CONFIG_DEVTMPFS=y' \
-    'CONFIG_DEVTMPFS_MOUNT=y' \
-    '# CONFIG_PANIC_ON_OOPS is not set' \
-    'CONFIG_PANIC_TIMEOUT=5'; do
-    grep -q "^$recovery_config$" "$OUT_DIR/.config" || {
-      echo "ERROR: missing recovery compatibility config: $recovery_config" >&2
-      exit 1
-    }
-  done
 fi
 
 rm -f "$OUT_DIR/kernel/config_data" \
@@ -215,6 +189,6 @@ echo "KSU manager package restriction: disabled"
 echo "ReSukiSU multi-manager support: enabled"
 echo "ReSukiSU + SuSFS: enabled"
 echo "KPM: $([[ "$KPM" == 1 ]] && echo enabled || echo disabled)"
-echo "Recovery compatibility: $([[ "$RECOVERY_COMPAT" == 1 ]] && echo enabled || echo disabled)"
+echo "Recovery/TWRP KSU userspace hook guard: enabled"
 echo "Image (for TWRP prebuilt/venus/kernel): $KERNEL_IMAGE"
 echo "Image.gz: $KERNEL_IMAGE_GZ"
