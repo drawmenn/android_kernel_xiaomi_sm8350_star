@@ -15,6 +15,15 @@ else
 fi
 OUT_DIR="${OUT_DIR:-$DEFAULT_OUT_DIR}"
 JOBS="${JOBS:-$(nproc)}"
+RECOVERY_COMPAT="${RECOVERY_COMPAT:-1}"
+if [[ "$RECOVERY_COMPAT" =~ ^(1|y|Y|yes|YES|true|TRUE|on|ON)$ ]]; then
+  RECOVERY_COMPAT=1
+elif [[ "$RECOVERY_COMPAT" =~ ^(0|n|N|no|NO|false|FALSE|off|OFF)$ ]]; then
+  RECOVERY_COMPAT=0
+else
+  echo "ERROR: RECOVERY_COMPAT must be 1 or 0" >&2
+  exit 1
+fi
 
 export ARCH=arm64
 export SUBARCH=arm64
@@ -64,6 +73,7 @@ CONFIG_ARGS=(
   --enable KSU \
   --set-str KSU_FULL_NAME_FORMAT "%TAG_NAME%-%COMMIT_SHA%@%REPO_NAME%" \
   --enable KSU_MULTI_MANAGER_SUPPORT \
+  --enable KSU_DISABLE_IN_RECOVERY \
   --disable KSU_TRACEPOINT_HOOK \
   --disable KSU_MANUAL_HOOK \
   --enable KSU_SUSFS \
@@ -86,6 +96,14 @@ if (( KPM )); then
 else
   CONFIG_ARGS+=(--disable KPM)
 fi
+if (( RECOVERY_COMPAT )); then
+  CONFIG_ARGS+=(
+    --enable DEVTMPFS
+    --enable DEVTMPFS_MOUNT
+    --disable PANIC_ON_OOPS
+    --set-val PANIC_TIMEOUT 5
+  )
+fi
 
 "$ROOT_DIR/scripts/config" --file "$OUT_DIR/.config" "${CONFIG_ARGS[@]}"
 make "${MAKE_ARGS[@]}" olddefconfig
@@ -96,6 +114,7 @@ grep -q '^CONFIG_ZRAM_DEF_COMP="lz4"$' "$OUT_DIR/.config" || {
 for required_config in \
   'CONFIG_KSU=y' \
   'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y' \
+  'CONFIG_KSU_DISABLE_IN_RECOVERY=y' \
   'CONFIG_KSU_SUSFS=y' \
   'CONFIG_KSU_SUSFS_SUS_PATH=y' \
   'CONFIG_KSU_SUSFS_SUS_MOUNT=y' \
@@ -130,12 +149,24 @@ else
     exit 1
   }
 fi
+if (( RECOVERY_COMPAT )); then
+  for recovery_config in \
+    'CONFIG_DEVTMPFS=y' \
+    'CONFIG_DEVTMPFS_MOUNT=y' \
+    '# CONFIG_PANIC_ON_OOPS is not set' \
+    'CONFIG_PANIC_TIMEOUT=5'; do
+    grep -q "^$recovery_config$" "$OUT_DIR/.config" || {
+      echo "ERROR: missing recovery compatibility config: $recovery_config" >&2
+      exit 1
+    }
+  done
+fi
 
 rm -f "$OUT_DIR/kernel/config_data" \
       "$OUT_DIR/kernel/config_data.gz" \
       "$OUT_DIR/kernel/configs.o" \
       "$OUT_DIR/kernel/.configs.o.cmd"
-make -j"$JOBS" "${MAKE_ARGS[@]}" Image.gz dtbs
+make -j"$JOBS" "${MAKE_ARGS[@]}" Image Image.gz dtbs
 
 if grep -aq 'com\.resukisu\.resukisu' "$OUT_DIR/vmlinux"; then
   echo "ERROR: manager package restriction is still embedded in vmlinux" >&2
@@ -153,8 +184,37 @@ if [[ -x "$ROOT_DIR/scripts/extract-ikconfig" ]]; then
   }
 fi
 
+KERNEL_IMAGE="$OUT_DIR/arch/arm64/boot/Image"
+KERNEL_IMAGE_GZ="$OUT_DIR/arch/arm64/boot/Image.gz"
+if [[ -n "${TWRP_DEVICE_DIR:-}" ]]; then
+  TWRP_DEVICE_DIR="$(realpath "$TWRP_DEVICE_DIR")"
+  if [[ ! -f "$TWRP_DEVICE_DIR/BoardConfig.mk" ||
+        ! -d "$TWRP_DEVICE_DIR/prebuilt/venus" ]]; then
+    echo "ERROR: TWRP_DEVICE_DIR must point to device/xiaomi/venus" >&2
+    exit 1
+  fi
+  install -m 0644 "$KERNEL_IMAGE" "$TWRP_DEVICE_DIR/prebuilt/venus/kernel"
+  if [[ -f "$TWRP_DEVICE_DIR/prebuilt/modules.load.recovery" ]]; then
+    cp -a "$TWRP_DEVICE_DIR/prebuilt/modules.load.recovery" \
+      "$TWRP_DEVICE_DIR/prebuilt/modules.load.recovery.bak"
+    cat > "$TWRP_DEVICE_DIR/prebuilt/modules.load.recovery" <<'EOF'
+# This kernel builds the Venus recovery display/touch/charger paths in-tree.
+# Do not load stale prebuilt modules from the 5.4.147 TWRP kernel package.
+EOF
+  fi
+  if grep -q '^TW_LOAD_VENDOR_MODULES[[:space:]]*:=' "$TWRP_DEVICE_DIR/BoardConfig.mk"; then
+    cp -a "$TWRP_DEVICE_DIR/BoardConfig.mk" "$TWRP_DEVICE_DIR/BoardConfig.mk.bak"
+    sed -i -E 's/^TW_LOAD_VENDOR_MODULES[[:space:]]*:=.*/TW_LOAD_VENDOR_MODULES := ""/' \
+      "$TWRP_DEVICE_DIR/BoardConfig.mk"
+    echo "TWRP vendor module autoload disabled: $TWRP_DEVICE_DIR/BoardConfig.mk"
+  fi
+  echo "TWRP prebuilt kernel updated: $TWRP_DEVICE_DIR/prebuilt/venus/kernel"
+fi
+
 echo "KSU manager package restriction: disabled"
 echo "ReSukiSU multi-manager support: enabled"
 echo "ReSukiSU + SuSFS: enabled"
 echo "KPM: $([[ "$KPM" == 1 ]] && echo enabled || echo disabled)"
-echo "Image.gz: $OUT_DIR/arch/arm64/boot/Image.gz"
+echo "Recovery compatibility: $([[ "$RECOVERY_COMPAT" == 1 ]] && echo enabled || echo disabled)"
+echo "Image (for TWRP prebuilt/venus/kernel): $KERNEL_IMAGE"
+echo "Image.gz: $KERNEL_IMAGE_GZ"
