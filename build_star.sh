@@ -38,11 +38,11 @@ cd "$ROOT_DIR"
 mkdir -p "$OUT_DIR"
 
 # This defconfig was derived from the working Mi 11 Ultra vendor kernel
-# configuration, then adjusted for the star target and the DSL feature set.
+# configuration, then adjusted for the star target and the NekoMake feature set.
 make "${MAKE_ARGS[@]}" star_dsl_defconfig
 
 scripts/config --file "$OUT_DIR/.config" \
-  --set-str LOCALVERSION "-DSL-star-qgki" \
+  --set-str LOCALVERSION "-ikun-NekoMake-star-qgqi" \
   --enable MACH_XIAOMI \
   --enable MACH_XIAOMI_SM8350 \
   --enable MACH_XIAOMI_STAR \

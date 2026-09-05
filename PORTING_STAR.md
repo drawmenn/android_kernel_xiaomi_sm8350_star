@@ -1,7 +1,8 @@
 # Xiaomi 11 Ultra (`star`) port
 
 This fork keeps the `venus-5.10bpf` base and adds a reproducible `star`
-build configuration for the Xiaomi 11 Ultra.
+build configuration for the Xiaomi 11 Ultra. The kernel release is
+`5.4.302-ikun-NekoMake-star-qgqi`.
 
 The tested build enables the `star` machine target, kernel module support,
 QGKI audio, the Xiaomi battery/thermal drivers, AW8697 haptics, and the
