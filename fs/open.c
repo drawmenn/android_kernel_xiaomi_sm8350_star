@@ -343,7 +343,12 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
 	return ksys_fallocate(fd, mode, offset, len);
 }
 
-#ifdef CONFIG_KSU
+#ifdef CONFIG_KSU_SUSFS
+extern struct static_key_true ksu_su_compat_enabled;
+extern bool __ksu_is_allow_uid_for_current(uid_t uid);
+extern int ksu_handle_faccessat(int *dfd, struct filename **filename,
+				int *mode, int *flags);
+#elif defined(CONFIG_KSU)
 extern int ksu_handle_faccessat(int *dfd,
 				const char __user **filename_user, int *mode,
 				int *flags);
@@ -437,8 +442,11 @@ long do_faccessat(int dfd, const char __user *filename, int mode, int flags)
 	int res;
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
 	const struct cred *old_cred = NULL;
+#ifdef CONFIG_KSU_SUSFS
+	struct filename *fname;
+#endif
 
-#ifdef CONFIG_KSU
+#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_SUSFS)
 	ksu_handle_faccessat(&dfd, &filename, &mode, &flags);
 #endif
 
@@ -457,7 +465,21 @@ long do_faccessat(int dfd, const char __user *filename, int mode, int flags)
 			return -ENOMEM;
 	}
 retry:
+#ifdef CONFIG_KSU_SUSFS
+	fname = getname_flags(filename, lookup_flags, NULL);
+
+	if (likely(susfs_is_current_proc_no_su()))
+		goto orig_flow;
+
+	if (static_branch_likely(&ksu_su_compat_enabled) &&
+	    unlikely(__ksu_is_allow_uid_for_current(__kuid_val(current_uid()))))
+		ksu_handle_faccessat(&dfd, &fname, &mode, &flags);
+
+orig_flow:
+	res = filename_lookup(dfd, fname, lookup_flags, &path, NULL);
+#else
 	res = user_path_at(dfd, filename, lookup_flags, &path);
+#endif
 	if (res)
 		goto out;
 
