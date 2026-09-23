@@ -1780,6 +1780,14 @@ config CRYPTO_LZ4P
 	help
 	  This is the ARM64-accelerated LZ4P compression algorithm for zram.
 
+config CRYPTO_ZSTDN
+	tristate "OPlus ZSTDn compression algorithm"
+	depends on MODULES
+	select CRYPTO_ALGAPI
+	select CRYPTO_ACOMP2
+	help
+	  Builds the OPlus ZSTDn compressor as a loadable module for zram.
+
 config CRYPTO_ZSTD
 	tristate "Zstd compression algorithm"
 	select CRYPTO_ALGAPI

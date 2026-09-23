@@ -61,6 +61,7 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable CRYPTO_LZ4K \
   --enable CRYPTO_LZ4KD \
   --enable CRYPTO_LZ4P \
+  --module CRYPTO_ZSTDN \
   --enable ZRAM_DEF_COMP_LZ4 \
   --enable F2FS_FS_COMPRESSION \
   --enable F2FS_FS_LZO \
