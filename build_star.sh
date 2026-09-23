@@ -56,6 +56,7 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable LEDS_QPNP_VIBRATOR_LDO \
   --enable ZRAM \
   --enable ZRAM_MULTI_COMP \
+  --enable CRYPTO_LZO \
   --enable CRYPTO_LZ4 \
   --enable ZRAM_DEF_COMP_LZ4 \
   --enable F2FS_FS_COMPRESSION \
