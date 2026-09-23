@@ -159,6 +159,7 @@ obj-$(CONFIG_LZ4P_COMPRESS) += lz4p/
 obj-$(CONFIG_ZSTD_COMPRESS) += zstd/
 obj-$(CONFIG_ZSTD_DECOMPRESS) += zstd/
 obj-$(CONFIG_CRYPTO_ZSTDN) += zstdn/
+obj-$(CONFIG_CRYPTO_ZSTDN_O) += zstdn_o/
 obj-$(CONFIG_XZ_DEC) += xz/
 obj-$(CONFIG_RAID6_PQ) += raid6/
 
