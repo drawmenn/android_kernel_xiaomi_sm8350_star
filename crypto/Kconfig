@@ -1770,6 +1770,16 @@ config CRYPTO_LZ4KD
 	help
 	  This is the LZ4KD compression algorithm for zram.
 
+config CRYPTO_LZ4P
+	bool "LZ4P compression algorithm"
+	depends on ARM64 && KERNEL_MODE_NEON
+	select CRYPTO_ALGAPI
+	select CRYPTO_ACOMP2
+	select LZ4_COMPRESS
+	select LZ4P_COMPRESS
+	help
+	  This is the ARM64-accelerated LZ4P compression algorithm for zram.
+
 config CRYPTO_ZSTD
 	tristate "Zstd compression algorithm"
 	select CRYPTO_ALGAPI

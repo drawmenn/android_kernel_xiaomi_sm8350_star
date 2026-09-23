@@ -1,0 +1,2 @@
+config LZ4P_COMPRESS
+	bool

@@ -155,6 +155,7 @@ obj-$(CONFIG_LZ4K_COMPRESS) += lz4k/
 obj-$(CONFIG_LZ4K_DECOMPRESS) += lz4k/
 obj-$(CONFIG_LZ4KD_COMPRESS) += lz4kd/
 obj-$(CONFIG_LZ4KD_DECOMPRESS) += lz4kd/
+obj-$(CONFIG_LZ4P_COMPRESS) += lz4p/
 obj-$(CONFIG_ZSTD_COMPRESS) += zstd/
 obj-$(CONFIG_ZSTD_DECOMPRESS) += zstd/
 obj-$(CONFIG_XZ_DEC) += xz/

@@ -306,6 +306,8 @@ config LZ4KD_COMPRESS
 config LZ4KD_DECOMPRESS
 	tristate
 
+source "lib/lz4p/Kconfig"
+
 config ZSTD_COMPRESS
 	select XXHASH
 	tristate
