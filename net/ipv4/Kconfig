@@ -665,6 +665,14 @@ config TCP_CONG_BBR
 	bufferbloat, policers, or AQM schemes that do not provide a delay
 	signal. It requires the fq ("Fair Queue") pacing packet scheduler.
 
+config TCP_CONG_BBR3
+	bool "Google BBRv3 TCP (experimental 5.4 backport)"
+	default n
+	help
+	  Enable the Google BBRv3 congestion-control algorithm as "bbr3".
+	  This backport adapts newer TCP interfaces to Linux 5.4, and retains
+	  the original BBR as a separate fallback. The fq qdisc is recommended.
+
 choice
 	prompt "Default TCP congestion control"
 	default DEFAULT_CUBIC
@@ -702,6 +710,9 @@ choice
 	config DEFAULT_BBR
 		bool "BBR" if TCP_CONG_BBR=y
 
+	config DEFAULT_BBR3
+		bool "BBRv3" if TCP_CONG_BBR3=y
+
 	config DEFAULT_RENO
 		bool "Reno"
 endchoice
@@ -726,6 +737,7 @@ config DEFAULT_TCP_CONG
 	default "dctcp" if DEFAULT_DCTCP
 	default "cdg" if DEFAULT_CDG
 	default "bbr" if DEFAULT_BBR
+	default "bbr3" if DEFAULT_BBR3
 	default "cubic"
 
 config TCP_MD5SIG
