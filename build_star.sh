@@ -97,6 +97,21 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable MILLET \
   --disable KPM
 
+# Keep the experimental BBRv3 backport opt-in. Build with BBR3=1 to
+# select BBRv3 and fq while retaining the original BBR as a fallback.
+if [[ "${BBR3:-0}" == "1" ]]; then
+  scripts/config --file "$OUT_DIR/.config" \
+    --enable TCP_CONG_ADVANCED \
+    --enable TCP_CONG_BBR \
+    --enable TCP_CONG_BBR3 \
+    --disable DEFAULT_CUBIC \
+    --enable DEFAULT_BBR3 \
+    --enable NET_SCH_FQ \
+    --enable NET_SCH_DEFAULT \
+    --disable DEFAULT_PFIFO_FAST \
+    --enable DEFAULT_FQ
+fi
+
 make "${MAKE_ARGS[@]}" olddefconfig
 make -j"$JOBS" "${MAKE_ARGS[@]}" Image.gz dtbs modules
 
