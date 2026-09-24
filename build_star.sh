@@ -97,9 +97,9 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable MILLET \
   --disable KPM
 
-# Keep the experimental BBRv3 backport opt-in. Build with BBR3=1 to
-# select BBRv3 and fq while retaining the original BBR as a fallback.
-if [[ "${BBR3:-0}" == "1" ]]; then
+# Select BBRv3 and fq by default after device validation. Set BBR3=0 to
+# use the original defconfig defaults; the original BBR remains available.
+if [[ "${BBR3:-1}" == "1" ]]; then
   scripts/config --file "$OUT_DIR/.config" \
     --enable TCP_CONG_ADVANCED \
     --enable TCP_CONG_BBR \
