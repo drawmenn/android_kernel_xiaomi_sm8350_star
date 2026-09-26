@@ -4,7 +4,7 @@
 ## Adapted for Xiaomi Mi 11 Ultra (star)
 
 properties() { '
-kernel.string= 5.4.302-ikun-NekoMake-star-qgqi for Xiaomi 11 Ultra
+kernel.string= @KERNEL_RELEASE@ for Xiaomi 11 Ultra
 do.devicecheck=1
 do.modules=0
 do.systemless=0

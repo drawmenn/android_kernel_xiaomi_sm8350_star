@@ -23,5 +23,13 @@ The default input is:
 out-star-5.4.302/arch/arm64/boot/Image.gz
 ```
 
-Override `IMAGE`, `OUT_DIR`, or `PACKAGE_NAME` when needed. The generated
+`build_star.sh` adds the Asia/Shanghai build date (`yyMMdd`) to the kernel
+release, for example `5.4.302-ikun-NekoMake-star-260927-qgqi+`. The package
+script reads that release from `OUT_DIR/include/config/kernel.release` and uses
+it for the Recovery banner and, without `PACKAGE_NAME`, the ZIP filename (with
+the trailing `+` omitted). Build the kernel again before packaging after a
+date change.
+
+Override `IMAGE`, `OUT_DIR`, or `PACKAGE_NAME` when needed. Keep `IMAGE` and
+`OUT_DIR` from the same build to avoid a mismatched name. The generated
 `Image.gz` and ZIP are ignored by this directory's `.gitignore`.
