@@ -97,9 +97,9 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable MILLET \
   --disable KPM
 
-# Select BBRv3 and fq by default after device validation. Set BBR3=0 to
-# use the original defconfig defaults; the original BBR remains available.
-if [[ "${BBR3:-1}" == "1" ]]; then
+# Keep the original CUBIC/pfifo_fast defaults. Set BBR3=1 to opt into
+# BBRv3, the original BBR, and fq for experimental builds.
+if [[ "${BBR3:-0}" == "1" ]]; then
   scripts/config --file "$OUT_DIR/.config" \
     --enable TCP_CONG_ADVANCED \
     --enable TCP_CONG_BBR \
