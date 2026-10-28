@@ -5263,6 +5263,16 @@ struct inode *__ext4_iget(struct super_block *sb, unsigned long ino,
 		goto bad_inode;
 	}
 
+	ret = check_igot_inode(inode, flags, function, line);
+	if (ret == -ESTALE) {
+		brelse(iloc.bh);
+		unlock_new_inode(inode);
+		iput(inode);
+		return ERR_PTR(-ESTALE);
+	}
+	if (ret)
+		goto bad_inode;
+
 	brelse(iloc.bh);
 
 	unlock_new_inode(inode);

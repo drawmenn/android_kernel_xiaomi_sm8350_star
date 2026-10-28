@@ -136,8 +136,12 @@ obj-$(CONFIG_SCF_TORTURE_TEST) += scftorture.o
 
 $(obj)/configs.o: $(obj)/config_data.gz
 
+# configs.o embeds kernel/config_data.gz through .incbin. Keep it out of
+# ThinLTO so the linker cannot reuse a stale cached object after .config changes.
+CFLAGS_REMOVE_configs.o += $(CC_FLAGS_LTO)
+
 targets += config_data config_data.gz
-$(obj)/config_data.gz: arch/arm64/configs/haydn-stock_defconfig FORCE
+$(obj)/config_data.gz: $(obj)/config_data FORCE
 	$(call if_changed,gzip)
 
 filechk_cat = cat $<

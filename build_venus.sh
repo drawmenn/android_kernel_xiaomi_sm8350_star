@@ -2,7 +2,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="${OUT_DIR:-$ROOT_DIR/out-venus-5.4.285}"
+KPM="${KPM:-1}"
+if [[ "$KPM" =~ ^(1|y|Y|yes|YES|true|TRUE|on|ON)$ ]]; then
+  KPM=1
+  DEFAULT_OUT_DIR="$ROOT_DIR/out-venus-5.4.302-kpm"
+elif [[ "$KPM" =~ ^(0|n|N|no|NO|false|FALSE|off|OFF)$ ]]; then
+  KPM=0
+  DEFAULT_OUT_DIR="$ROOT_DIR/out-venus-5.4.302"
+else
+  echo "ERROR: KPM must be 1 or 0" >&2
+  exit 1
+fi
+OUT_DIR="${OUT_DIR:-$DEFAULT_OUT_DIR}"
 JOBS="${JOBS:-$(nproc)}"
 
 export ARCH=arm64
@@ -17,6 +28,9 @@ export OBJCOPY=llvm-objcopy
 export OBJDUMP=llvm-objdump
 export STRIP=llvm-strip
 export READELF=llvm-readelf
+# ReSukiSU multi-manager mode works through APK signature matching. Do not pass
+# KSU_MANAGER_PACKAGE, or the kernel filters managers by one package name first.
+unset KSU_MANAGER_PACKAGE
 
 MAKE_ARGS=(
   O="$OUT_DIR"
@@ -38,7 +52,7 @@ cd "$ROOT_DIR"
 mkdir -p "$OUT_DIR"
 
 make "${MAKE_ARGS[@]}" venus_defconfig
-"$ROOT_DIR/scripts/config" --file "$OUT_DIR/.config" \
+CONFIG_ARGS=(
   --enable ZRAM \
   --enable CRYPTO_LZ4 \
   --enable ZRAM_DEF_COMP_LZ4 \
@@ -46,12 +60,101 @@ make "${MAKE_ARGS[@]}" venus_defconfig
   --disable ZRAM_DEF_COMP_LZO \
   --disable ZRAM_DEF_COMP_ZSTD \
   --disable ZRAM_DEF_COMP_LZ4HC \
-  --disable ZRAM_DEF_COMP_842
+  --disable ZRAM_DEF_COMP_842 \
+  --enable KSU \
+  --set-str KSU_FULL_NAME_FORMAT "%TAG_NAME%-%COMMIT_SHA%@%REPO_NAME%" \
+  --enable KSU_MULTI_MANAGER_SUPPORT \
+  --disable KSU_TRACEPOINT_HOOK \
+  --disable KSU_MANUAL_HOOK \
+  --enable KSU_SUSFS \
+  --enable KSU_SUSFS_SUS_PATH \
+  --enable KSU_SUSFS_SUS_MOUNT \
+  --enable KSU_SUSFS_SUS_KSTAT \
+  --enable KSU_SUSFS_SPOOF_UNAME \
+  --enable KSU_SUSFS_ENABLE_LOG \
+  --enable KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+  --enable KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+  --enable KSU_SUSFS_OPEN_REDIRECT \
+  --enable KSU_SUSFS_SUS_MAP \
+  --enable KALLSYMS \
+  --enable KALLSYMS_ALL \
+  --enable BPF_STREAM_PARSER
+)
+
+if (( KPM )); then
+  CONFIG_ARGS+=(--enable KPM)
+else
+  CONFIG_ARGS+=(--disable KPM)
+fi
+
+"$ROOT_DIR/scripts/config" --file "$OUT_DIR/.config" "${CONFIG_ARGS[@]}"
 make "${MAKE_ARGS[@]}" olddefconfig
 grep -q '^CONFIG_ZRAM_DEF_COMP="lz4"$' "$OUT_DIR/.config" || {
   echo "ERROR: ZRAM default compressor is not lz4" >&2
   exit 1
 }
+for required_config in \
+  'CONFIG_KSU=y' \
+  'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y' \
+  'CONFIG_KSU_SUSFS=y' \
+  'CONFIG_KSU_SUSFS_SUS_PATH=y' \
+  'CONFIG_KSU_SUSFS_SUS_MOUNT=y' \
+  'CONFIG_KSU_SUSFS_SUS_KSTAT=y' \
+  'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' \
+  'CONFIG_KSU_SUSFS_ENABLE_LOG=y' \
+  'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' \
+  'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y' \
+  'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' \
+  'CONFIG_KSU_SUSFS_SUS_MAP=y'; do
+  grep -q "^$required_config$" "$OUT_DIR/.config" || {
+    echo "ERROR: missing $required_config" >&2
+    exit 1
+  }
+done
+grep -q '^# CONFIG_KSU_TRACEPOINT_HOOK is not set$' "$OUT_DIR/.config" || {
+  echo "ERROR: CONFIG_KSU_TRACEPOINT_HOOK must be disabled for this 5.4 tree" >&2
+  exit 1
+}
+grep -q '^# CONFIG_KSU_MANUAL_HOOK is not set$' "$OUT_DIR/.config" || {
+  echo "ERROR: CONFIG_KSU_MANUAL_HOOK must be disabled for ReSukiSU SuSFS inline mode" >&2
+  exit 1
+}
+if (( KPM )); then
+  grep -q '^CONFIG_KPM=y$' "$OUT_DIR/.config" || {
+    echo "ERROR: CONFIG_KPM is not enabled" >&2
+    exit 1
+  }
+else
+  grep -q '^# CONFIG_KPM is not set$' "$OUT_DIR/.config" || {
+    echo "ERROR: CONFIG_KPM must be disabled for this build" >&2
+    exit 1
+  }
+fi
+
+rm -f "$OUT_DIR/kernel/config_data" \
+      "$OUT_DIR/kernel/config_data.gz" \
+      "$OUT_DIR/kernel/configs.o" \
+      "$OUT_DIR/kernel/.configs.o.cmd"
 make -j"$JOBS" "${MAKE_ARGS[@]}" Image.gz dtbs
 
+if grep -aq 'com\.resukisu\.resukisu' "$OUT_DIR/vmlinux"; then
+  echo "ERROR: manager package restriction is still embedded in vmlinux" >&2
+  exit 1
+fi
+
+if [[ -x "$ROOT_DIR/scripts/extract-ikconfig" ]]; then
+  EMBEDDED_CONFIG="$OUT_DIR/.config.embedded"
+  "$ROOT_DIR/scripts/extract-ikconfig" "$OUT_DIR/arch/arm64/boot/Image.gz" > "$EMBEDDED_CONFIG"
+  cmp -s "$OUT_DIR/.config" "$EMBEDDED_CONFIG" || {
+    echo "ERROR: Image.gz embedded IKCONFIG does not match $OUT_DIR/.config" >&2
+    diff -u --label ".config" "$OUT_DIR/.config" \
+      --label "Image.gz IKCONFIG" "$EMBEDDED_CONFIG" | sed -n '1,120p' >&2 || true
+    exit 1
+  }
+fi
+
+echo "KSU manager package restriction: disabled"
+echo "ReSukiSU multi-manager support: enabled"
+echo "ReSukiSU + SuSFS: enabled"
+echo "KPM: $([[ "$KPM" == 1 ]] && echo enabled || echo disabled)"
 echo "Image.gz: $OUT_DIR/arch/arm64/boot/Image.gz"

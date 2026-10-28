@@ -1041,7 +1041,7 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 	ffs_log("enter: %s", epfile->name);
 
 	/* Are we still active? */
-	if (WARN_ON(epfile->ffs->state != FFS_ACTIVE))
+	if (epfile->ffs->state != FFS_ACTIVE)
 		return -ENODEV;
 
 	/* Wait for endpoint to be enabled */
@@ -1287,7 +1287,7 @@ ffs_epfile_open(struct inode *inode, struct file *file)
 		epfile->name, epfile->ffs->state, epfile->ffs->setup_state,
 		epfile->ffs->flags, atomic_read(&epfile->opened));
 
-	if (WARN_ON(epfile->ffs->state != FFS_ACTIVE))
+	if (epfile->ffs->state != FFS_ACTIVE)
 		return -ENODEV;
 
 	file->private_data = epfile;
@@ -1462,7 +1462,7 @@ static long ffs_epfile_ioctl(struct file *file, unsigned code,
 		epfile->name, code, value, epfile->ffs->state,
 		epfile->ffs->setup_state, epfile->ffs->flags);
 
-	if (WARN_ON(epfile->ffs->state != FFS_ACTIVE))
+	if (epfile->ffs->state != FFS_ACTIVE)
 		return -ENODEV;
 
 	/* Wait for endpoint to be enabled */
@@ -4161,7 +4161,7 @@ static int ffs_ready(struct ffs_data *ffs)
 		ret = -EINVAL;
 		goto done;
 	}
-	if (WARN_ON(ffs_obj->desc_ready)) {
+	if (ffs_obj->desc_ready) {
 		ret = -EBUSY;
 		goto done;
 	}

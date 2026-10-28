@@ -1657,6 +1657,7 @@ static void sk_prot_free(struct proto *prot, struct sock *sk)
 	mem_cgroup_sk_free(sk);
 	security_sk_free(sk);
 	trace_android_rvh_sk_free(sk);
+	sk_owner_put(sk);
 	if (slab != NULL)
 		kmem_cache_free(slab, sk);
 	else

@@ -827,6 +827,11 @@ KBUILD_CFLAGS += -Wno-tautological-compare
 KBUILD_CFLAGS += -Wno-bitfield-constant-conversion
 KBUILD_CFLAGS += $(call cc-disable-warning, undefined-optimized)
 KBUILD_CFLAGS += -fno-builtin
+# Clang may emit a warning when a const variable, such as the dummy variables
+# in typecheck(), or const member of an aggregate type are not initialized.
+# In audited kernel cases this is often intentional; -Wuninitialized still
+# covers actual use of uninitialized values.
+KBUILD_CFLAGS += $(call cc-disable-warning, default-const-init-unsafe)
 else
 
 # Warn about unmarked fall-throughs in switch statement.

@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
-<<<<<<< HEAD
  * Copyright (c) 2012-2014, 2017-2021, The Linux Foundation. All rights reserved.
-=======
- * Copyright (c) 2012-2014, 2017-2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2021 XiaoMi, Inc.
->>>>>>> a2a39fea63bb (techpack: audio: Import xiaomi changes from mona-r-oss)
  */
 
 #include <linux/init.h>
