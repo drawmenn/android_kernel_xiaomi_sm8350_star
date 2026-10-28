@@ -787,11 +787,9 @@ int open_shroot(unsigned int xid, struct cifs_tcon *tcon,
 	/* BB TBD check to see if oplock level check can be removed below */
 	if (o_rsp->OplockLevel == SMB2_OPLOCK_LEVEL_LEASE) {
 		kref_get(&tcon->crfid.refcount);
-		rc = smb2_parse_contexts(server, rsp_iov,
+		smb2_parse_contexts(server, o_rsp,
 				&oparms.fid->epoch,
 				oparms.fid->lease_key, &oplock, NULL);
-		if (rc)
-			goto oshr_exit;
 	} else
 		goto oshr_exit;
 

@@ -553,7 +553,7 @@ static struct nft_table *nft_table_lookup(const struct net *net,
 
 static struct nft_table *nft_table_lookup_byhandle(const struct net *net,
 						   const struct nlattr *nla,
-						   int family, u8 genmask)
+						   u8 genmask)
 {
 	struct nftables_pernet *nft_net;
 	struct nft_table *table;
@@ -561,7 +561,6 @@ static struct nft_table *nft_table_lookup_byhandle(const struct net *net,
 	nft_net = net_generic(net, nf_tables_net_id);
 	list_for_each_entry(table, &nft_net->tables, list) {
 		if (be64_to_cpu(nla_get_be64(nla)) == table->handle &&
-		    table->family == family &&
 		    nft_active_genmask(table, genmask))
 			return table;
 	}
@@ -1244,7 +1243,7 @@ static int nf_tables_deltable(struct net *net, struct sock *nlsk,
 
 	if (nla[NFTA_TABLE_HANDLE]) {
 		attr = nla[NFTA_TABLE_HANDLE];
-		table = nft_table_lookup_byhandle(net, attr, family, genmask);
+		table = nft_table_lookup_byhandle(net, attr, genmask);
 	} else {
 		attr = nla[NFTA_TABLE_NAME];
 		table = nft_table_lookup(net, attr, family, genmask);
@@ -2241,7 +2240,7 @@ static const struct nft_expr_type *__nft_expr_type_get(u8 family,
 {
 	const struct nft_expr_type *type, *candidate = NULL;
 
-	list_for_each_entry_rcu(type, &nf_tables_expressions, list) {
+	list_for_each_entry(type, &nf_tables_expressions, list) {
 		if (!nla_strcmp(nla, type->name)) {
 			if (!type->family && !candidate)
 				candidate = type;
@@ -2273,13 +2272,9 @@ static const struct nft_expr_type *nft_expr_type_get(struct net *net,
 	if (nla == NULL)
 		return ERR_PTR(-EINVAL);
 
-	rcu_read_lock();
 	type = __nft_expr_type_get(family, nla);
-	if (type != NULL && try_module_get(type->owner)) {
-		rcu_read_unlock();
+	if (type != NULL && try_module_get(type->owner))
 		return type;
-	}
-	rcu_read_unlock();
 
 	lockdep_nfnl_nft_mutex_not_held();
 #ifdef CONFIG_MODULES
@@ -2830,15 +2825,6 @@ static void nf_tables_rule_release(const struct nft_ctx *ctx,
 	nf_tables_rule_destroy(ctx, rule);
 }
 
-/** nft_chain_validate - loop detection and hook validation
- *
- * @ctx: context containing call depth and base chain
- * @chain: chain to validate
- *
- * Walk through the rules of the given chain and chase all jumps/gotos
- * and set lookups until either the jump limit is hit or all reachable
- * chains have been validated.
- */
 int nft_chain_validate(const struct nft_ctx *ctx, const struct nft_chain *chain)
 {
 	struct nft_expr *expr, *last;
@@ -2857,9 +2843,6 @@ int nft_chain_validate(const struct nft_ctx *ctx, const struct nft_chain *chain)
 			if (!expr->ops->validate)
 				continue;
 
-			/* This may call nft_chain_validate() recursively,
-			 * callers that do so must increment ctx->level.
-			 */
 			err = expr->ops->validate(ctx, expr, &data);
 			if (err < 0)
 				return err;
@@ -3490,7 +3473,7 @@ int nf_msecs_to_jiffies64(const struct nlattr *nla, u64 *result)
 		return -ERANGE;
 
 	ms *= NSEC_PER_MSEC;
-	*result = nsecs_to_jiffies64(ms) ? : !!ms;
+	*result = nsecs_to_jiffies64(ms);
 	return 0;
 }
 
@@ -4314,7 +4297,8 @@ static int nf_tables_fill_setelem(struct sk_buff *skb,
 
 	if (nft_set_ext_exists(ext, NFT_SET_EXT_DATA) &&
 	    nft_data_dump(skb, NFTA_SET_ELEM_DATA, nft_set_ext_data(ext),
-			  nft_set_datatype(set), set->dlen) < 0)
+			  set->dtype == NFT_DATA_VERDICT ? NFT_DATA_VERDICT : NFT_DATA_VALUE,
+			  set->dlen) < 0)
 		goto nla_put_failure;
 
 	if (nft_set_ext_exists(ext, NFT_SET_EXT_EXPR) &&
@@ -4683,10 +4667,8 @@ static int nf_tables_getsetelem(struct net *net, struct sock *nlsk,
 
 	nla_for_each_nested(attr, nla[NFTA_SET_ELEM_LIST_ELEMENTS], rem) {
 		err = nft_get_set_elem(&ctx, set, attr);
-		if (err < 0) {
-			NL_SET_BAD_ATTR(extack, attr);
+		if (err < 0)
 			break;
-		}
 	}
 
 	return err;
@@ -4888,16 +4870,10 @@ static int nft_add_set_elem(struct nft_ctx *ctx, struct nft_set *set,
 	if (nla[NFTA_SET_ELEM_EXPIRATION] != NULL) {
 		if (!(set->flags & NFT_SET_TIMEOUT))
 			return -EINVAL;
-		if (timeout == 0)
-			return -EOPNOTSUPP;
-
 		err = nf_msecs_to_jiffies64(nla[NFTA_SET_ELEM_EXPIRATION],
 					    &expiration);
 		if (err)
 			return err;
-
-		if (expiration > timeout)
-			return -ERANGE;
 	}
 
 	err = nft_setelem_parse_key(ctx, set, &elem.key.val,
@@ -5084,10 +5060,8 @@ static int nf_tables_newsetelem(struct net *net, struct sock *nlsk,
 
 	nla_for_each_nested(attr, nla[NFTA_SET_ELEM_LIST_ELEMENTS], rem) {
 		err = nft_add_set_elem(&ctx, set, attr, nlh->nlmsg_flags);
-		if (err < 0) {
-			NL_SET_BAD_ATTR(extack, attr);
+		if (err < 0)
 			return err;
-		}
 	}
 
 	if (nft_net->validate_state == NFT_VALIDATE_DO)
@@ -5287,10 +5261,9 @@ static int nf_tables_delsetelem(struct net *net, struct sock *nlsk,
 
 	nla_for_each_nested(attr, nla[NFTA_SET_ELEM_LIST_ELEMENTS], rem) {
 		err = nft_del_setelem(&ctx, set, attr);
-		if (err < 0) {
-			NL_SET_BAD_ATTR(extack, attr);
+		if (err < 0)
 			break;
-		}
+
 		set->ndeact++;
 	}
 	return err;
@@ -7777,7 +7750,6 @@ static bool nf_tables_valid_genid(struct net *net, u32 genid)
 	bool genid_ok;
 
 	mutex_lock(&nft_net->commit_mutex);
-	nft_net->tstamp = get_jiffies_64();
 
 	genid_ok = genid == 0 || nft_net->base_seq == genid;
 	if (!genid_ok)
@@ -7829,6 +7801,106 @@ int nft_chain_validate_hooks(const struct nft_chain *chain,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(nft_chain_validate_hooks);
+
+/*
+ * Loop detection - walk through the ruleset beginning at the destination chain
+ * of a new jump until either the source chain is reached (loop) or all
+ * reachable chains have been traversed.
+ *
+ * The loop check is performed whenever a new jump verdict is added to an
+ * expression or verdict map or a verdict map is bound to a new chain.
+ */
+
+static int nf_tables_check_loops(const struct nft_ctx *ctx,
+				 const struct nft_chain *chain);
+
+static int nf_tables_loop_check_setelem(const struct nft_ctx *ctx,
+					struct nft_set *set,
+					const struct nft_set_iter *iter,
+					struct nft_set_elem *elem)
+{
+	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+	const struct nft_data *data;
+
+	if (nft_set_ext_exists(ext, NFT_SET_EXT_FLAGS) &&
+	    *nft_set_ext_flags(ext) & NFT_SET_ELEM_INTERVAL_END)
+		return 0;
+
+	data = nft_set_ext_data(ext);
+	switch (data->verdict.code) {
+	case NFT_JUMP:
+	case NFT_GOTO:
+		return nf_tables_check_loops(ctx, data->verdict.chain);
+	default:
+		return 0;
+	}
+}
+
+static int nf_tables_check_loops(const struct nft_ctx *ctx,
+				 const struct nft_chain *chain)
+{
+	const struct nft_rule *rule;
+	const struct nft_expr *expr, *last;
+	struct nft_set *set;
+	struct nft_set_binding *binding;
+	struct nft_set_iter iter;
+
+	if (ctx->chain == chain)
+		return -ELOOP;
+
+	list_for_each_entry(rule, &chain->rules, list) {
+		nft_rule_for_each_expr(expr, last, rule) {
+			struct nft_immediate_expr *priv;
+			const struct nft_data *data;
+			int err;
+
+			if (strcmp(expr->ops->type->name, "immediate"))
+				continue;
+
+			priv = nft_expr_priv(expr);
+			if (priv->dreg != NFT_REG_VERDICT)
+				continue;
+
+			data = &priv->data;
+			switch (data->verdict.code) {
+			case NFT_JUMP:
+			case NFT_GOTO:
+				err = nf_tables_check_loops(ctx,
+							data->verdict.chain);
+				if (err < 0)
+					return err;
+			default:
+				break;
+			}
+		}
+	}
+
+	list_for_each_entry(set, &ctx->table->sets, list) {
+		if (!nft_is_active_next(ctx->net, set))
+			continue;
+		if (!(set->flags & NFT_SET_MAP) ||
+		    set->dtype != NFT_DATA_VERDICT)
+			continue;
+
+		list_for_each_entry(binding, &set->bindings, list) {
+			if (!(binding->flags & NFT_SET_MAP) ||
+			    binding->chain != chain)
+				continue;
+
+			iter.genmask	= nft_genmask_next(ctx->net);
+			iter.skip 	= 0;
+			iter.count	= 0;
+			iter.err	= 0;
+			iter.fn		= nf_tables_loop_check_setelem;
+
+			set->ops->walk(ctx, set, &iter);
+			if (iter.err < 0)
+				return iter.err;
+		}
+	}
+
+	return 0;
+}
 
 /**
  *	nft_parse_u32_check - fetch u32 attribute and check for maximum value
@@ -7965,16 +8037,13 @@ static int nft_validate_register_store(const struct nft_ctx *ctx,
 		if (data != NULL &&
 		    (data->verdict.code == NFT_GOTO ||
 		     data->verdict.code == NFT_JUMP)) {
-			err = nft_chain_validate(ctx, data->verdict.chain);
+			err = nf_tables_check_loops(ctx, data->verdict.chain);
 			if (err < 0)
 				return err;
 		}
 
 		return 0;
 	default:
-		if (type != NFT_DATA_VALUE)
-			return -EINVAL;
-
 		if (reg < NFT_REG_1 * NFT_REG_SIZE / NFT_REG32_SIZE)
 			return -EINVAL;
 		if (len == 0)
@@ -7983,6 +8052,8 @@ static int nft_validate_register_store(const struct nft_ctx *ctx,
 		    FIELD_SIZEOF(struct nft_regs, data))
 			return -ERANGE;
 
+		if (data != NULL && type != NFT_DATA_VALUE)
+			return -EINVAL;
 		return 0;
 	}
 }

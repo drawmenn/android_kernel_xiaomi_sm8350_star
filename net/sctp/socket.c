@@ -5370,14 +5370,14 @@ int sctp_for_each_endpoint(int (*cb)(struct sctp_endpoint *, void *),
 			   void *p) {
 	int err = 0;
 	int hash = 0;
-	struct sctp_endpoint *ep;
+	struct sctp_ep_common *epb;
 	struct sctp_hashbucket *head;
 
 	for (head = sctp_ep_hashtable; hash < sctp_ep_hashsize;
 	     hash++, head++) {
 		read_lock_bh(&head->lock);
-		sctp_for_each_hentry(ep, &head->chain) {
-			err = cb(ep, p);
+		sctp_for_each_hentry(epb, &head->chain) {
+			err = cb(sctp_ep(epb), p);
 			if (err)
 				break;
 		}
@@ -7163,7 +7163,6 @@ static int sctp_getsockopt_assoc_ids(struct sock *sk, int len,
 	struct sctp_sock *sp = sctp_sk(sk);
 	struct sctp_association *asoc;
 	struct sctp_assoc_ids *ids;
-	size_t ids_size;
 	u32 num = 0;
 
 	if (sctp_style(sk, TCP))
@@ -7176,11 +7175,11 @@ static int sctp_getsockopt_assoc_ids(struct sock *sk, int len,
 		num++;
 	}
 
-	ids_size = struct_size(ids, gaids_assoc_id, num);
-	if (len < ids_size)
+	if (len < sizeof(struct sctp_assoc_ids) + sizeof(sctp_assoc_t) * num)
 		return -EINVAL;
 
-	len = ids_size;
+	len = sizeof(struct sctp_assoc_ids) + sizeof(sctp_assoc_t) * num;
+
 	ids = kmalloc(len, GFP_USER | __GFP_NOWARN);
 	if (unlikely(!ids))
 		return -ENOMEM;
@@ -8375,7 +8374,6 @@ static int sctp_listen_start(struct sock *sk, int backlog)
 	struct sctp_endpoint *ep = sp->ep;
 	struct crypto_shash *tfm = NULL;
 	char alg[32];
-	int err;
 
 	/* Allocate HMAC for generating cookie. */
 	if (!sp->hmac && sp->sctp_hmac_alg) {
@@ -8402,26 +8400,17 @@ static int sctp_listen_start(struct sock *sk, int backlog)
 	 */
 	inet_sk_set_state(sk, SCTP_SS_LISTENING);
 	if (!ep->base.bind_addr.port) {
-		if (sctp_autobind(sk)) {
-			err = -EAGAIN;
-			goto err;
-		}
+		if (sctp_autobind(sk))
+			return -EAGAIN;
 	} else {
 		if (sctp_get_port(sk, inet_sk(sk)->inet_num)) {
-			err = -EADDRINUSE;
-			goto err;
+			inet_sk_set_state(sk, SCTP_SS_CLOSED);
+			return -EADDRINUSE;
 		}
 	}
 
-	WRITE_ONCE(sk->sk_max_ack_backlog, backlog);
-	err = sctp_hash_endpoint(ep);
-	if (err)
-		goto err;
-
-	return 0;
-err:
-	inet_sk_set_state(sk, SCTP_SS_CLOSED);
-	return err;
+	sk->sk_max_ack_backlog = backlog;
+	return sctp_hash_endpoint(ep);
 }
 
 /*
@@ -8474,7 +8463,7 @@ int sctp_inet_listen(struct socket *sock, int backlog)
 
 	/* If we are already listening, just update the backlog */
 	if (sctp_sstate(sk, LISTENING))
-		WRITE_ONCE(sk->sk_max_ack_backlog, backlog);
+		sk->sk_max_ack_backlog = backlog;
 	else {
 		err = sctp_listen_start(sk, backlog);
 		if (err)
