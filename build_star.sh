@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="${OUT_DIR:-$ROOT_DIR/out-star-5.4.302}"
+OUT_DIR="${OUT_DIR:-$ROOT_DIR/out-star-5.4.274-ikun13-rebuild}"
 JOBS="${JOBS:-$(nproc)}"
 # Capture the China-local build date once so the running kernel identifies
 # when this particular image was compiled, independent of the host timezone.
@@ -45,7 +45,7 @@ mkdir -p "$OUT_DIR"
 make "${MAKE_ARGS[@]}" star_dsl_defconfig
 
 scripts/config --file "$OUT_DIR/.config" \
-  --set-str LOCALVERSION "-ikun-NekoMake-star-${NEKOMAKE_BUILD_DATE}-qgqi" \
+  --set-str LOCALVERSION "-ikun13-rebuild-star-${NEKOMAKE_BUILD_DATE}" \
   --enable MACH_XIAOMI \
   --enable MACH_XIAOMI_SM8350 \
   --enable MACH_XIAOMI_STAR \
@@ -116,6 +116,9 @@ if [[ "${BBR3:-0}" == "1" ]]; then
 fi
 
 make "${MAKE_ARGS[@]}" olddefconfig
+# The pinned builtin Root consumes compile.h. Generate it through the kernel's
+# original producer before a clean parallel build; do not copy a302 header.
+make "${MAKE_ARGS[@]}" init/version.o
 make -j"$JOBS" "${MAKE_ARGS[@]}" Image.gz dtbs modules
 
 echo "Built: $OUT_DIR/arch/arm64/boot/Image.gz"
