@@ -1599,18 +1599,6 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
 				if (!khugepaged_test_exit(mm)) {
 					struct mmu_notifier_range range;
 
-					/*
-					 * Re-check whether we have an ->anon_vma,
-					 * because collapse_and_free_pmd() requires
-					 * that either no ->anon_vma exists or the
-					 * anon_vma is locked. The earlier check is
-					 * racy because ->anon_vma can be populated
-					 * under the mmap_sem in read mode.
-					 */
-					if (vma->anon_vma) {
-						mmap_write_unlock(mm);
-						continue;
-					}
 					mmu_notifier_range_init(&range,
 								MMU_NOTIFY_CLEAR, 0,
 							NULL, mm, addr,
