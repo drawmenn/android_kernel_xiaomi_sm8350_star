@@ -1027,13 +1027,6 @@ static int ext4_xattr_inode_update_ref(handle_t *handle, struct inode *ea_inode,
 		goto out;
 
 	ref_count = ext4_xattr_inode_get_ref(ea_inode);
-	if ((ref_count == 0 && ref_change < 0) || (ref_count == U64_MAX && ref_change > 0)) {
-		ext4_error_inode(ea_inode, __func__, __LINE__, 0,
-			"EA inode %lu ref wraparound: ref_count=%llu ref_change=%d",
-			ea_inode->i_ino, ref_count, ref_change);
-		ret = -EFSCORRUPTED;
-		goto out;
-	}
 	ref_count += ref_change;
 	ext4_xattr_inode_set_ref(ea_inode, ref_count);
 
