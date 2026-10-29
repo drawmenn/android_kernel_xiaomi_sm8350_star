@@ -878,6 +878,35 @@ feature_matches(u64 reg, const struct arm64_cpu_capabilities *entry)
 	return val >= entry->min_field_value;
 }
 
+static u64
+read_scoped_sysreg(const struct arm64_cpu_capabilities *entry, int scope)
+{
+	WARN_ON(scope == SCOPE_LOCAL_CPU && preemptible());
+	if (scope == SCOPE_SYSTEM)
+		return read_sanitised_ftr_reg(entry->sys_reg);
+	else
+		return __read_sysreg_by_encoding(entry->sys_reg);
+}
+
+static bool
+has_user_cpuid_feature(const struct arm64_cpu_capabilities *entry, int scope)
+{
+	int mask;
+	struct arm64_ftr_reg *regp;
+	u64 val = read_scoped_sysreg(entry, scope);
+
+	regp = get_arm64_ftr_reg(entry->sys_reg);
+	if (!regp)
+		return false;
+
+	mask = cpuid_feature_extract_unsigned_field(regp->user_mask,
+						    entry->field_pos);
+	if (!mask)
+		return false;
+
+	return feature_matches(val, entry);
+}
+
 static bool
 has_cpuid_feature(const struct arm64_cpu_capabilities *entry, int scope)
 {
@@ -1331,6 +1360,17 @@ static bool can_use_gic_priorities(const struct arm64_cpu_capabilities *entry,
 }
 #endif
 
+static void user_feature_fixup(void)
+{
+	if (cpus_have_cap(ARM64_WORKAROUND_SPECULATIVE_SSBS)) {
+		struct arm64_ftr_reg *regp;
+
+		regp = get_arm64_ftr_reg(SYS_ID_AA64PFR1_EL1);
+		if (regp)
+			regp->user_mask &= ~GENMASK(7, 4); /* SSBS */
+	}
+}
+
 static void elf_hwcap_fixup(void)
 {
 #ifdef CONFIG_ARM64_ERRATUM_1742098
@@ -1667,6 +1707,13 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.sign = s,							\
 		.min_field_value = min_value,
 
+#define HWCAP_CPUID_MATCH_USER(reg, field, s, min_value)				\
+		.matches = has_user_cpuid_feature,					\
+		.sys_reg = reg,							\
+		.field_pos = field,						\
+		.sign = s,							\
+		.min_field_value = min_value,
+
 #define __HWCAP_CAP(name, cap_type, cap)					\
 		.desc = name,							\
 		.type = ARM64_CPUCAP_SYSTEM_FEATURE,				\
@@ -1677,6 +1724,12 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 	{									\
 		__HWCAP_CAP(#cap, cap_type, cap)				\
 		HWCAP_CPUID_MATCH(reg, field, s, min_value)			\
+	}
+
+#define HWCAP_CAP_USER(reg, field, s, min_value, cap_type, cap)			\
+	{									\
+		__HWCAP_CAP(#cap, cap_type, cap)				\
+		HWCAP_CPUID_MATCH_USER(reg, field, s, min_value)			\
 	}
 
 #define HWCAP_MULTI_CAP(list, cap_type, cap)					\
@@ -1757,7 +1810,7 @@ static const struct arm64_cpu_capabilities arm64_elf_hwcaps[] = {
 	HWCAP_CAP(SYS_ID_AA64ZFR0_EL1, ID_AA64ZFR0_SHA3_SHIFT, FTR_UNSIGNED, ID_AA64ZFR0_SHA3, CAP_HWCAP, KERNEL_HWCAP_SVESHA3),
 	HWCAP_CAP(SYS_ID_AA64ZFR0_EL1, ID_AA64ZFR0_SM4_SHIFT, FTR_UNSIGNED, ID_AA64ZFR0_SM4, CAP_HWCAP, KERNEL_HWCAP_SVESM4),
 #endif
-	HWCAP_CAP(SYS_ID_AA64PFR1_EL1, ID_AA64PFR1_SSBS_SHIFT, FTR_UNSIGNED, ID_AA64PFR1_SSBS_PSTATE_INSNS, CAP_HWCAP, KERNEL_HWCAP_SSBS),
+	HWCAP_CAP_USER(SYS_ID_AA64PFR1_EL1, ID_AA64PFR1_SSBS_SHIFT, FTR_UNSIGNED, ID_AA64PFR1_SSBS_PSTATE_INSNS, CAP_HWCAP, KERNEL_HWCAP_SSBS),
 #ifdef CONFIG_ARM64_PTR_AUTH
 	HWCAP_MULTI_CAP(ptr_auth_hwcap_addr_matches, CAP_HWCAP, KERNEL_HWCAP_PACA),
 	HWCAP_MULTI_CAP(ptr_auth_hwcap_gen_matches, CAP_HWCAP, KERNEL_HWCAP_PACG),
@@ -2178,6 +2231,7 @@ void __init setup_cpu_features(void)
 
 	setup_system_capabilities();
 	mark_const_caps_ready();
+	user_feature_fixup();
 	setup_elf_hwcaps(arm64_elf_hwcaps);
 
 	if (system_supports_32bit_el0()) {
