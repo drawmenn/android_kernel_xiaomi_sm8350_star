@@ -2376,25 +2376,9 @@ done:
 static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 {
 	u32			reg, reg1;
-	u32			timeout = 2000;
-	u32			saved_config = 0;
+	u32			timeout = 1500;
 
 	dbg_event(0xFF, "run_stop", is_on);
-
-	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
-	if (reg & DWC3_GUSB2PHYCFG_SUSPHY) {
-		saved_config |= DWC3_GUSB2PHYCFG_SUSPHY;
-		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
-	}
-
-	if (reg & DWC3_GUSB2PHYCFG_ENBLSLPM) {
-		saved_config |= DWC3_GUSB2PHYCFG_ENBLSLPM;
-		reg &= ~DWC3_GUSB2PHYCFG_ENBLSLPM;
-	}
-
-	if (saved_config)
-		dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
-
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 	if (is_on) {
 		if (dwc->revision <= DWC3_REVISION_187A) {

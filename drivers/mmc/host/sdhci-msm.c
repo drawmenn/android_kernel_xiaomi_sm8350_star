@@ -1496,7 +1496,6 @@ static int sdhci_msm_execute_tuning(struct mmc_host *mmc, u32 opcode)
 	int rc = 0;
 	struct mmc_ios ios = host->mmc->ios;
 	u32 core_vendor_spec;
-	u32 config;
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct sdhci_msm_host *msm_host = sdhci_pltfm_priv(pltfm_host);
 	const struct sdhci_msm_offset *msm_offset =
