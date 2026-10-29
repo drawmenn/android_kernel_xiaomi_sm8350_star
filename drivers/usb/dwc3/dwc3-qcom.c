@@ -729,6 +729,9 @@ clk_disable:
 	if (qcom->gdsc)
 		if (regulator_disable(qcom->gdsc))
 			dev_err(qcom->dev, "unable to disable usb3 gdsc\n");
+reset_assert:
+	reset_control_assert(qcom->resets);
+
 	return ret;
 }
 
