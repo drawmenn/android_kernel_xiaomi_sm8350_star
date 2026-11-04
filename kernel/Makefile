@@ -134,13 +134,24 @@ KCOV_INSTRUMENT_stackleak.o := n
 
 obj-$(CONFIG_SCF_TORTURE_TEST) += scftorture.o
 
-$(obj)/configs.o: $(obj)/config_data.gz
+$(obj)/configs.o: $(obj)/config_data.h
 
-# configs.o embeds kernel/config_data.gz through .incbin. Keep it out of
-# ThinLTO so the linker cannot reuse a stale cached object after .config changes.
-CFLAGS_REMOVE_configs.o += $(CC_FLAGS_LTO)
+# Encode the real compressed configuration into the C/LLVM input so ThinLTO
+# cache keys include its content. Do not disable CFI on the procfs callback.
+filechk_ikconfig = ( \
+	echo 'static const char kernel_config_data[] __used = "IKCFG_ST"'; \
+	$(objtree)/scripts/bin2c < $<; \
+	echo '"IKCFG_ED";'; )
 
-targets += config_data config_data.gz
+# bin2c is only built through the hostprog list when CONFIG_BUILD_BIN2C is
+# selected; IKCONFIG selects it so the tool exists before this rule runs.
+$(objtree)/scripts/bin2c: $(srctree)/scripts/bin2c.c FORCE
+	$(Q)$(MAKE) $(build)=scripts scripts/bin2c
+
+$(obj)/config_data.h: $(obj)/config_data.gz $(objtree)/scripts/bin2c FORCE
+	$(call filechk,ikconfig)
+
+targets += config_data config_data.gz config_data.h
 $(obj)/config_data.gz: $(obj)/config_data FORCE
 	$(call if_changed,gzip)
 

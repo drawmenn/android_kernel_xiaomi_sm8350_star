@@ -20,31 +20,24 @@
  * "IKCFG_ST" and "IKCFG_ED" are used to extract the config data from
  * a binary kernel image or a module. See scripts/extract-ikconfig.
  */
-asm (
-"	.pushsection .rodata, \"a\"		\n"
-"	.ascii \"IKCFG_ST\"			\n"
-"	.global kernel_config_data		\n"
-"kernel_config_data:				\n"
-"	.incbin \"kernel/config_data.gz\"	\n"
-"	.global kernel_config_data_end		\n"
-"kernel_config_data_end:			\n"
-"	.ascii \"IKCFG_ED\"			\n"
-"	.popsection				\n"
-);
+#define IKCONFIG_MAGIC_SIZE 8
+/*
+ * Include the actual gzip bytes in this translation unit. Its ThinLTO input
+ * then changes when .config changes, while file-operation callbacks retain
+ * normal CFI instrumentation instead of compiling configs.o without LTO.
+ */
+#include "config_data.h"
 
 #ifdef CONFIG_IKCONFIG_PROC
-
-extern char kernel_config_data;
-extern char kernel_config_data_end;
 
 static ssize_t
 ikconfig_read_current(struct file *file, char __user *buf,
 		      size_t len, loff_t * offset)
 {
 	return simple_read_from_buffer(buf, len, offset,
-				       &kernel_config_data,
-				       &kernel_config_data_end -
-				       &kernel_config_data);
+				       kernel_config_data + IKCONFIG_MAGIC_SIZE,
+				       sizeof(kernel_config_data) - 1 -
+				       2 * IKCONFIG_MAGIC_SIZE);
 }
 
 static const struct file_operations ikconfig_file_ops = {
@@ -63,7 +56,8 @@ static int __init ikconfig_init(void)
 	if (!entry)
 		return -ENOMEM;
 
-	proc_set_size(entry, &kernel_config_data_end - &kernel_config_data);
+	proc_set_size(entry, sizeof(kernel_config_data) - 1 -
+			    2 * IKCONFIG_MAGIC_SIZE);
 
 	return 0;
 }

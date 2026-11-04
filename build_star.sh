@@ -43,6 +43,13 @@ make "${MAKE_ARGS[@]}" star_dsl_defconfig
 
 scripts/config --file "$OUT_DIR/.config" \
   --set-str LOCALVERSION "-qgki-g4dfe63e0666f" \
+  --enable MODVERSIONS \
+  --disable DEBUG_FS \
+  --disable PAGE_OWNER \
+  --enable ARM64_SW_TTBR0_PAN \
+  --enable CFI_CLANG \
+  --enable CFI_PERMISSIVE \
+  --enable SHADOW_CALL_STACK \
   --enable MACH_XIAOMI \
   --enable MACH_XIAOMI_SM8350 \
   --enable MACH_XIAOMI_STAR \
@@ -113,6 +120,25 @@ if [[ "${BBR3:-0}" == "1" ]]; then
 fi
 
 make "${MAKE_ARGS[@]}" olddefconfig
+
+# Config gate: the ROM's compatibility_matrix.5.xml requires these five clauses
+# for kernel 5.4; anything else drifting is an unintended edit or dependency.
+for required in MODVERSIONS ARM64_SW_TTBR0_PAN CFI_CLANG SHADOW_CALL_STACK; do
+  grep -qx "CONFIG_${required}=y" "$OUT_DIR/.config" || {
+    echo "FCM5 requirement not applied: CONFIG_${required}" >&2
+    exit 2
+  }
+done
+grep -qx '# CONFIG_DEBUG_FS is not set' "$OUT_DIR/.config" || {
+  echo "FCM5 requirement not applied: CONFIG_DEBUG_FS must be off" >&2
+  exit 2
+}
+
+if [[ "${CONFIG_ONLY:-0}" == "1" ]]; then
+  echo "Configured only: $OUT_DIR/.config"
+  exit 0
+fi
+
 # The pinned builtin Root consumes compile.h. Generate it through the kernel's
 # original producer before a clean parallel build; do not copy a302 header.
 make "${MAKE_ARGS[@]}" init/version.o
