@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DIR="$ROOT_DIR/anykernel3"
-IMAGE="${IMAGE:-$ROOT_DIR/out-star-5.4.302/arch/arm64/boot/Image.gz}"
-OUT_DIR="${OUT_DIR:-$ROOT_DIR/out-star-5.4.302}"
+IMAGE="${IMAGE:-$ROOT_DIR/out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz}"
+OUT_DIR="${OUT_DIR:-$ROOT_DIR/out-star-5.4.274-qgki-g4dfe63e0666f}"
 KERNEL_RELEASE_FILE="$OUT_DIR/include/config/kernel.release"
 
 if [ ! -f "$KERNEL_RELEASE_FILE" ]; then
