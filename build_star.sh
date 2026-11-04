@@ -80,6 +80,8 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable F2FS_UNFAIR_RWSEM \
   --enable F2FS_CP_OPT \
   --enable KSU \
+  --enable SECCOMP \
+  --enable SECCOMP_FILTER \
   --enable KSU_MULTI_MANAGER_SUPPORT \
   --enable KSU_DISABLE_IN_RECOVERY \
   --disable KSU_TRACEPOINT_HOOK \
@@ -131,6 +133,36 @@ for required in MODVERSIONS ARM64_SW_TTBR0_PAN CFI_CLANG SHADOW_CALL_STACK; do
 done
 grep -qx '# CONFIG_DEBUG_FS is not set' "$OUT_DIR/.config" || {
   echo "FCM5 requirement not applied: CONFIG_DEBUG_FS must be off" >&2
+  exit 2
+}
+
+# seccomp must be fully functional: CONFIG_SECCOMP alone gives strict mode only,
+# while KernelSU's per-app "disable seccomp" profile and the manager's Seccomp
+# status readout both rely on filter mode being compiled in.
+for required in SECCOMP SECCOMP_FILTER; do
+  grep -qx "CONFIG_${required}=y" "$OUT_DIR/.config" || {
+    echo "seccomp requirement not applied: CONFIG_${required}" >&2
+    exit 2
+  }
+done
+grep -qx "CONFIG_HAVE_ARCH_SECCOMP_FILTER=y" "$OUT_DIR/.config" || {
+  echo "seccomp requirement not applied: arch lacks SECCOMP_FILTER support" >&2
+  exit 2
+}
+
+# 5.4 is non-GKI: the tracepoint syscall-redirect hook needs GKI2 (5.10+), so the
+# only valid modes here are Manual Hook or SuSFS Inline Hook. Inline is chosen
+# because the tree already carries the simonpunk susfs patches it depends on.
+grep -qx "CONFIG_KSU_SUSFS=y" "$OUT_DIR/.config" || {
+  echo "KSU hook mode not applied: expected SuSFS Inline Hook" >&2
+  exit 2
+}
+grep -qx '# CONFIG_KSU_TRACEPOINT_HOOK is not set' "$OUT_DIR/.config" || {
+  echo "KSU hook mode invalid: tracepoint hook needs GKI2 (5.10+)" >&2
+  exit 2
+}
+grep -qx '# CONFIG_KSU_MANUAL_HOOK is not set' "$OUT_DIR/.config" || {
+  echo "KSU hook mode invalid: manual hook conflicts with SUSFS inline hook" >&2
   exit 2
 }
 
