@@ -22,6 +22,10 @@ MAKE_ARGS=(
   O="$OUT_DIR"
   ARCH="$ARCH"
   SUBARCH="$SUBARCH"
+  # Pin LOCALVERSION empty: scripts/setlocalversion appends "+" whenever the
+  # build is not at an annotated tag, which would silently turn the release
+  # into 5.4.274-qgki-g4dfe63e0666f+ for anyone building from a plain checkout.
+  LOCALVERSION=""
   LLVM="$LLVM"
   LLVM_IAS="$LLVM_IAS"
   CC="$CC"
