@@ -3,7 +3,7 @@
 [**English Documentation**](README.md) | **中文说明文档**
 
 本项目是专为 **小米 11 Pro / Ultra (`star` / `mars`, 骁龙 888 - SM8350)** 定制的高通通用内核镜像 (QGKI 5.4.274)。
-内核深度集成了 **ReSukiSU / BakaSU**、**SuSFS v2.3.0**、**Linux 5.10 Seccomp 高速位图加速**，并在内核底层实现了对 **春秋检测器 (Chunqiu Detector)**、MOMO 等高阶检测机制的硬件级/内核级静默防御。
+内核深度集成了 **ReSukiSU / BakaSU**、**SuSFS v2.3.0**、**Linux 5.10 Seccomp 位图加速**，并在内核底层实现了对 **春秋检测器 (Chunqiu Detector)**、MOMO 等高阶检测机制的硬件级/内核级静默防御。
 
 ---
 
@@ -25,63 +25,69 @@
 
 ---
 
-## 🛡️ 内核特性与春秋检测防御机制
+## 🛡️ 内核特性与架构亮点
 
-### 1. 深度 Root 与隐藏底座
-- **ReSukiSU / BakaSU (v4.2.0-rc3)**：基于 KernelSU 深度优化的现代 Root 管理器，内置 SuSFS Inline Hook（零 kprobes 开销）。
-- **SuSFS v2.3.0**：高级 VFS 挂载隐藏与重定向系统（`hide_mount`、`sus_su`、`open_redirect`、`kstat` 属性伪装）。
-- **Seccomp Cache**：Backport 自 Linux 5.10，位图加速系统调用过滤，大幅降低应用卡顿。
+### 1. 深度安全与隐匿底座
+- **ReSukiSU / BakaSU (v4.2.0-rc3)**：
+  - 基于 KernelSU 深度优化的现代 Root 管理器，支持多管理器鉴权共存。
+  - 采用 **Inline Hook 架构** 替代传统 kprobes，消除 tracepoint 泄露与执行性能开销。
+- **SuSFS v2.3.0 协议全功能集成**：
+  - 全套 VFS 挂载隔离与隐藏：`sus_path`、`sus_mount`、`sus_kstat`、`open_redirect` 与 `sus_map`。
+  - 文件描述符防泄露：针对 `/proc/[pid]/fdinfo` 和 `inotify_fdinfo` 进行内核级过滤，拦截针对隐藏文件的探测。
+  - `vfs_statfs` 文件系统特征伪装，屏蔽 overlayfs、tmpfs 特征。
+- **针对春秋检测器 (Chunqiu Detector) 的内核级防御**：
+  - **解决 `Tampered kernel` (篡改/非官方内核)**：
+    * 固化官方 Android NDK Clang 编译器签名：`Android (7284624, based on r416183b) clang version 12.0.5, LLD 12.0.5`。
+    * 固化官方 OTA 构建主机与稳定时间戳：`android-build@c3-miui-ota-bd174.bj`（`Wed May 8 16:00:00 CST 2024`）。
+    * 实现 `/proc/version` 与 `uname -r` 三路绝对对齐，消除编译器指纹与编译环境暴露。
+  - **解决 `Suspicious Surroundings (b)` (`/data/local/tmp` 元数据异常)**：
+    * 适配 Android 独立挂载点根目录识别，引入 inode 动态关联缓存。
+    * 非特权应用（UID >= 10000）无论是通过路径还是文件句柄（fd）调用 `stat` 扫描 `/data/local/tmp`，内核强制伪装返回出厂标准值：**`ino=156`**、**`uid:gid=2000:2000`** (`shell:shell`)、权限 **`0771`**。
+  - **解决 `检测SELinux Policy时发现可疑问题`**：
+    * **`status.sequence / policyload`**：非特权进程映射 `/sys/fs/selinux/status` 时，内核返回独立洁净状态页，强制呈现 `sequence=0`、`policyload=0`、`enforcing=1`，彻底切断检测器利用策略重载判定 Root。
+    * **屏蔽通用脏规则**：对非特权进程查询掩盖 `system_server execmem`、`zygote adb_data_file search` 与 `system_server` 执行 apk 权限。
+    * **伪造决策序号**：将 `avd.seqno` 强制固化为 `1`。
 
-### 2. 针对春秋检测器 (Chunqiu Detector) 的内核级防御
-1. **解决 `Tampered kernel` (篡改/非官方内核)**：
-   - 固化官方 Android NDK Clang 编译器签名：`Android (7284624, based on r416183b) clang version 12.0.5, LLD 12.0.5`。
-   - 固化官方 OTA 构建主机与稳定时间戳：`android-build@c3-miui-ota-bd174.bj`（`Wed May 8 16:00:00 CST 2024`）。
-   - 实现 `/proc/version` 与 `uname -r` 三路绝对对齐。
-2. **解决 `Suspicious Surroundings (b)` (`/data/local/tmp` 元数据异常)**：
-   - 识别 Android `/data` 挂载点根目录 `dentry`，并建立 inode 动态缓存。
-   - 非特权应用（UID >= 10000）无论是通过路径还是文件句柄调用 `stat` 扫描 `/data/local/tmp`，内核强制伪装返回出厂标准值：**`ino=156`**、**`uid:gid=2000:2000`** (`shell:shell`)、权限 **`0771`**。
-3. **解决 `检测SELinux Policy时发现可疑问题`**：
-   - **`status.sequence / policyload`**：非特权进程映射 `/sys/fs/selinux/status` 时，内核返回独立洁净状态页，强制呈现 `sequence=0`、`policyload=0`、`enforcing=1`，彻底切断检测器利用策略重载判定 Root。
-   - **屏蔽通用脏规则**：对非特权进程查询掩盖 `system_server execmem`、`zygote adb_data_file search` 与 `system_server` 执行 apk 权限。
-   - **伪造决策序号**：将 `avd.seqno` 强制固化为 `1`。
+### 2. 性能与系统稳定性优化
+- **Linux 5.10 Seccomp Bitmap Fastpath (Backport)**：
+  - 从 Linux 5.10 主线反向移植 Seccomp Cache 机制（`action_cache` 位图）。高频无害系统调用直接跳过 BPF 规则遍历求值，显著减少应用运行与高负载下的微卡顿。
+- **编译器级 ThinLTO 全局优化**：
+  - 开启 Clang ThinLTO（`CONFIG_THINLTO=y`, `CONFIG_LTO_CLANG=y`），跨编译单元实现函数内联与指令重排，降低内存占用并提升调度执行效率。
+- **全面遵循 Android FCM5 与 VINTF 规范**：
+  - 满足 Google FCM 5 全套强制要求（`CONFIG_ARM64_SW_TTBR0_PAN=y`、`CONFIG_CFI_CLANG=y`、`CONFIG_SHADOW_CALL_STACK=y`）。
+  - 通过 `bin2c` 将 `.config` 静态嵌入内核，确保系统运行时 VINTF / IKCONFIG 校验完全放行，消除“内部错误/内核不兼容”系统弹窗。
+- **锁屏/熄屏卡死修复 (Binder Lockscreen Freeze Fix)**：
+  - 剔除了引起高通 888 机型在熄屏/AOD 下偶发死锁的第三方 Binder Freeze 通知反向补丁，恢复原生稳定通信机制。
 
 ---
 
-## 🚀 升级 KernelSU 和 SuSFS 的快捷方法
+## 🛠️ 通用升级指南 (KSU & SuSFS)
 
-当后续上游发布新版本时，按以下极简流程即可完成升级：
-
-### 快捷方法 A：升级 KernelSU / ReSukiSU
-KernelSU 在本仓库中作为 Git Submodule 挂载在 `KernelSU/` 目录：
+### 1. 通用方法：升级 KernelSU / ReSukiSU
+KernelSU 在本内核源码中作为 Git Submodule 挂载在源码根目录下的 `KernelSU/` 文件夹中：
 ```bash
-# 1. 进入 KernelSU 子模块目录
-cd /workspace/kernel-research/star-261030/KernelSU
+# 1. 在你的内核源码根目录中，进入 KernelSU 子模块
+cd KernelSU
 
-# 2. 拉取最新上游分支或标签
+# 2. 从远端拉取最新上游更新（Tags 或 分支）
 git fetch origin
 
-# 3. 检出目标版本（例如切换到最新的 release tag 或稳定 commit）
+# 3. 检出目标发布的 Release Tag 或特定 Commit
 git checkout <新Tag或Commit>
 
-# 4. 回到内核根目录，验证并重新编译
+# 4. 返回内核源码根目录
 cd ..
-./build_star.sh
+
+# 5. 核对并编译
+# (跨大版本升级时，请确认 KernelSU/kernel/core_hook.c 中的 SuSFS inline hook 函数定义与签名匹配)
 ```
-> **提示**：若跨大版本升级，请快速核对 `KernelSU/kernel/core_hook.c`，确保其与 SuSFS 的 inline hook 接口定义匹配。
 
-### 快捷方法 B：升级 SuSFS
-当 SuSFS 发布新版本协议（如 v2.4.x）时：
-```bash
-# 1. 替换头文件与核心实现
-# 将新版本的 susfs.h 放入 include/linux/susfs.h
-# 将新版本的 susfs.c 放入 fs/susfs.c
-
-# 2. 检查 VFS 补丁差异
-# 对比 fs/stat.c、fs/open.c、fs/proc/version.c 等文件是否有新增 hook 点
-
-# 3. 同步更新 KernelSU 端的 susfs inline 钩子
-# 4. 执行 ./build_star.sh 重新生成 AnyKernel3 刷机包
-```
+### 2. 通用方法：升级 SuSFS
+当 SuSFS 发布新版本协议规范（例如升级到 v2.4.x）时：
+1. **更新核心定义与代码**：将上游发布的最新 `susfs.h` 替换到内核源码的 `include/linux/susfs.h`，最新 `susfs.c` 替换到 `fs/susfs.c`。
+2. **检查 VFS 挂钩差异**：对比并更新关键 VFS 挂载与文件操作钩子（如 `fs/stat.c`、`fs/statfs.c`、`fs/open.c`、`fs/proc/fd.c`、`fs/notify/fdinfo.c`、`fs/proc/version.c` 等）。
+3. **同步 KernelSU 钩子**：更新 KernelSU 侧 `ksu_susfs` 的 inline 适配代码。
+4. **触发全量编译**：编译生成新的内核镜像与 AnyKernel3 刷机包，并搭配对应版本号的 SuSFS 模块使用。
 
 ---
 
