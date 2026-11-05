@@ -84,14 +84,14 @@ sudo apt-get install -y \
 
 ### 3. 源码与子模块
 ```bash
-git clone https://github.com/<用户名>/<仓库名>.git -b qgki-4dfe63e0666f kernel-star
+git clone https://github.com/drawmenn/android_kernel_xiaomi_star.git -b qgki-4dfe63e0666f kernel-star
 cd kernel-star
 git submodule update --init --recursive     # 必须：KernelSU 在此子模块中
 ```
 
 > **子模块说明**：`.gitmodules` 指向维护者的 KernelSU 分支，其中包含本内核所需的 `seccomp_cache` 提交（上游 ReSukiSU 目前尚未合并）。若该分支不可用，改为指向你自己的副本：
 > ```bash
-> git submodule set-url KernelSU https://github.com/<你>/BakaSU.git
+> git submodule set-url KernelSU https://github.com/<你的用户名>/BakaSU.git
 > git submodule update --init --recursive
 > ```
 
@@ -132,7 +132,7 @@ git add KernelSU && git commit -m "ksu: bump to <tag>"
 
 ## 📥 刷入
 
-1. 从 [Releases](https://github.com/<用户名>/<仓库名>/releases) 下载 AnyKernel3 刷机包。
+1. 从 [Releases](https://github.com/drawmenn/android_kernel_xiaomi_star/releases) 下载 AnyKernel3 刷机包。
 2. 进入 TWRP / OrangeFox Recovery。
 3. **先备份 `boot` 分区**。
 4. 刷入 `star-5.4.274-qgki-g4dfe63e0666f-AK3-r*.zip`。

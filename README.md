@@ -84,7 +84,7 @@ sudo apt-get install -y \
 
 ### 3. Source tree and submodules
 ```bash
-git clone https://github.com/<user>/<repo>.git -b qgki-4dfe63e0666f kernel-star
+git clone https://github.com/drawmenn/android_kernel_xiaomi_star.git -b qgki-4dfe63e0666f kernel-star
 cd kernel-star
 git submodule update --init --recursive     # required: KernelSU lives here
 ```
@@ -132,7 +132,7 @@ Build toggles: `JOBS=<n>`, `OUT_DIR=<path>`, `CONFIG_ONLY=1` (stop after `.confi
 
 ## 📦 Flashing
 
-1. Download the AnyKernel3 zip from [Releases](https://github.com/<user>/<repo>/releases).
+1. Download the AnyKernel3 zip from [Releases](https://github.com/drawmenn/android_kernel_xiaomi_star/releases).
 2. Boot into TWRP / OrangeFox.
 3. **Back up the `boot` partition first.**
 4. Flash `star-5.4.274-qgki-g4dfe63e0666f-AK3-r*.zip`.
