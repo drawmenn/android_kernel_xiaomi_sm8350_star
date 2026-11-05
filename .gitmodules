@@ -1,4 +1,4 @@
 [submodule "KernelSU"]
 	path = KernelSU
-	url = https://github.com/dundwv/BakaSU.git
+	url = https://github.com/drawmenn/BakaSU.git
 	branch = star-5.4-seccomp-cache
