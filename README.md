@@ -53,7 +53,38 @@ Because this kernel is packaged via **AnyKernel3 (boot-kernel-only)** without to
 
 ---
 
-## 🛠️ General Upgrade Guide (KSU & SuSFS)
+## 🛠️ Build Environment & Prerequisites
+
+Before compiling or upgrading, ensure that your build machine satisfies the following prerequisites:
+
+### 1. Host Dependencies (Debian / Ubuntu)
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential bc bison flex libssl-dev libelf-dev libncurses5-dev \
+    git curl wget zip unzip cpio python3 python-is-python3 binutils-aarch64-linux-gnu
+```
+
+### 2. Toolchain Setup (LLVM / Clang)
+Building this kernel requires an `aarch64`-capable Clang toolchain supporting ThinLTO:
+* **Recommended Official Android Clang**: AOSP Clang `r416183b` (Clang 12.0.5) or newer.
+* **System Clang**: Alternatively, host system `clang` (>= 12.0.0) with `lld`, `llvm-ar`, `llvm-nm`, `llvm-objcopy`, and `llvm-strip` available in `$PATH`.
+* Ensure `clang -v` and `ld.lld -v` operate properly in your terminal.
+
+### 3. Source Tree & Submodules Preparation
+Always initialize all nested submodules (notably `KernelSU`):
+```bash
+# Clone repository
+git clone https://github.com/<user>/<repo>.git -b qgki-4dfe63e0666f kernel-star
+cd kernel-star
+
+# Sync and pull submodules (KernelSU)
+git submodule update --init --recursive
+```
+
+---
+
+## 🔄 General Upgrade Guide (KSU & SuSFS)
 
 ### 1. Upgrading KernelSU / ReSukiSU
 KernelSU is integrated as a git submodule in the kernel source repository:
@@ -80,6 +111,18 @@ When upstream SuSFS releases a newer version (e.g., v2.4.x):
 2. **Kernel VFS Hooks**: Inspect hook diffs across core VFS files (`fs/stat.c`, `fs/statfs.c`, `fs/open.c`, `fs/proc/fd.c`, `fs/notify/fdinfo.c`, `fs/proc/version.c`).
 3. **KSU Integration**: Update `ksu_susfs` inline hooks in KernelSU accordingly.
 4. **Build & Package**: Trigger kernel compilation and package a new AnyKernel3 zip.
+
+---
+
+## 🔨 Building the Kernel
+
+To build the kernel image (`Image.gz`):
+```bash
+# Execute the automated build script (handles defconfig, FCM5 checks, and ThinLTO build)
+./build_star.sh
+```
+The compiled kernel artifact lands in:
+`out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
 
 ---
 

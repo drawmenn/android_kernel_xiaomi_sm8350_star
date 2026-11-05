@@ -61,9 +61,40 @@
 
 ---
 
-## 🛠️ 通用升级指南 (KSU & SuSFS)
+## 🛠️ 编译环境准备与先决条件
 
-### 1. 通用方法：升级 KernelSU / ReSukiSU
+在开始编译或升级内核之前，请确保你的宿主机或编译服务器满足以下前置环境：
+
+### 1. 基础依赖包安装 (Debian / Ubuntu)
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential bc bison flex libssl-dev libelf-dev libncurses5-dev \
+    git curl wget zip unzip cpio python3 python-is-python3 binutils-aarch64-linux-gnu
+```
+
+### 2. 交叉编译工具链 (LLVM / Clang)
+本内核针对 `aarch64` 架构与 ThinLTO 构建设计，必须准备可用的 Clang 工具链：
+* **推荐官方工具链**：AOSP Clang `r416183b` (Clang 12.0.5) 或更高版本（如 AOSP Clang 14/17）。
+* **系统原生工具链**：也可使用 Linux 发行版自带的 `clang` (>= 12.0.0)，并确保 `lld`、`llvm-ar`、`llvm-nm`、`llvm-objcopy`、`llvm-strip` 等在系统环境变量 `$PATH` 中。
+* 终端中执行 `clang -v` 和 `ld.lld -v` 可正常输出版本即代表工具链准备就绪。
+
+### 3. 源码拉取与子模块初始化
+请务必完整初始化子模块（特别是 `KernelSU` 目录）：
+```bash
+# 克隆源码仓库
+git clone https://github.com/<用户名>/<仓库名>.git -b qgki-4dfe63e0666f kernel-star
+cd kernel-star
+
+# 递归同步与拉取所有子模块 (KernelSU)
+git submodule update --init --recursive
+```
+
+---
+
+## 🔄 通用升级指南 (KSU & SuSFS)
+
+### 1. 通用升级 KernelSU / ReSukiSU
 KernelSU 在本内核源码中作为 Git Submodule 挂载在源码根目录下的 `KernelSU/` 文件夹中：
 ```bash
 # 1. 在你的内核源码根目录中，进入 KernelSU 子模块
@@ -82,12 +113,24 @@ cd ..
 # (跨大版本升级时，请确认 KernelSU/kernel/core_hook.c 中的 SuSFS inline hook 函数定义与签名匹配)
 ```
 
-### 2. 通用方法：升级 SuSFS
+### 2. 通用升级 SuSFS
 当 SuSFS 发布新版本协议规范（例如升级到 v2.4.x）时：
 1. **更新核心定义与代码**：将上游发布的最新 `susfs.h` 替换到内核源码的 `include/linux/susfs.h`，最新 `susfs.c` 替换到 `fs/susfs.c`。
 2. **检查 VFS 挂钩差异**：对比并更新关键 VFS 挂载与文件操作钩子（如 `fs/stat.c`、`fs/statfs.c`、`fs/open.c`、`fs/proc/fd.c`、`fs/notify/fdinfo.c`、`fs/proc/version.c` 等）。
 3. **同步 KernelSU 钩子**：更新 KernelSU 侧 `ksu_susfs` 的 inline 适配代码。
 4. **触发全量编译**：编译生成新的内核镜像与 AnyKernel3 刷机包，并搭配对应版本号的 SuSFS 模块使用。
+
+---
+
+## 🔨 内核一键编译
+
+环境准备完毕后，在源码根目录下执行构建脚本即可：
+```bash
+# 执行自动化构建脚本（自动配置 defconfig、应用 FCM5 安全检查并以 ThinLTO 编译）
+./build_star.sh
+```
+编译成功后，产物镜像位于：
+`out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
 
 ---
 
