@@ -30,7 +30,8 @@ struct mount;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat);
-static inline void susfs_sanitize_tmp_kstat(const struct path *path, struct kstat *stat)
+static unsigned long susfs_data_local_tmp_ino = 0;
+static inline void susfs_sanitize_tmp_kstat(const struct path *path, struct inode *inode, struct kstat *stat)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
 	if (likely(__kuid_val(current_uid()) < 10000))
@@ -39,16 +40,31 @@ static inline void susfs_sanitize_tmp_kstat(const struct path *path, struct ksta
 #endif
 		return;
 
+	if (inode && susfs_data_local_tmp_ino && inode->i_ino == susfs_data_local_tmp_ino) {
+		if (stat->ino > 1000)
+			stat->ino = 156;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+		stat->uid = make_kuid(current_user_ns(), 2000);
+		stat->gid = make_kgid(current_user_ns(), 2000);
+#endif
+		stat->mode = (stat->mode & S_IFMT) | 0771;
+		return;
+	}
+
 	if (path && path->dentry && path->dentry->d_name.name &&
 	    !strcmp(path->dentry->d_name.name, "tmp")) {
 		struct dentry *parent = path->dentry->d_parent;
 		if (parent && parent->d_name.name && !strcmp(parent->d_name.name, "local")) {
 			struct dentry *grandparent = parent->d_parent;
-			if (grandparent && grandparent->d_name.name && !strcmp(grandparent->d_name.name, "data")) {
-				/*
-				 * Inode for /data/local/tmp: detector checks if ino > 10000.
-				 * On clean stock builds it is typically < 1000 (e.g. 156).
-				 */
+			/*
+			 * In Android VFS, /data may be a mount point where grandparent is "/" (sb root)
+			 * or it may be part of rootfs where grandparent is "data".
+			 */
+			if (!grandparent || !grandparent->d_name.name ||
+			    !strcmp(grandparent->d_name.name, "data") ||
+			    !strcmp(grandparent->d_name.name, "/")) {
+				if (inode)
+					susfs_data_local_tmp_ino = inode->i_ino;
 				if (stat->ino > 1000)
 					stat->ino = 156;
 				/* Enforce stock standard shell:shell ownership and 0771 mode */
@@ -141,7 +157,7 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 					    query_flags);
 		if (!err) {
 			susfs_sus_kstat_spoof_generic_fillattr(inode, stat);
-			susfs_sanitize_tmp_kstat(path, stat);
+			susfs_sanitize_tmp_kstat(path, inode, stat);
 		}
 		return err;
 	}
@@ -152,7 +168,7 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 
 	generic_fillattr(inode, stat);
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	susfs_sanitize_tmp_kstat(path, stat);
+	susfs_sanitize_tmp_kstat(path, inode, stat);
 #endif
 	return 0;
 }

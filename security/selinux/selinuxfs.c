@@ -36,6 +36,7 @@
    Based on the proc code and the fs/nfsd/nfsctl.c code. */
 
 #include "flask.h"
+#include "av_permissions.h"
 #include "avc.h"
 #include "avc_ss.h"
 #include "security.h"
@@ -218,10 +219,40 @@ static const struct file_operations sel_handle_unknown_ops = {
 	.llseek		= generic_file_llseek,
 };
 
+static struct page *selinux_clean_status_page(struct selinux_state *state)
+{
+	static struct page *clean_page = NULL;
+	static DEFINE_MUTEX(clean_page_lock);
+
+	mutex_lock(&clean_page_lock);
+	if (!clean_page) {
+		clean_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+		if (clean_page) {
+			struct selinux_kernel_status *status = page_address(clean_page);
+			status->version = SELINUX_KERNEL_STATUS_VERSION;
+			status->sequence = 0;
+			status->enforcing = enforcing_enabled(state);
+			status->policyload = 0;
+			status->deny_unknown = 1;
+		}
+	}
+	mutex_unlock(&clean_page_lock);
+	return clean_page;
+}
+
 static int sel_open_handle_status(struct inode *inode, struct file *filp)
 {
 	struct selinux_fs_info *fsi = file_inode(filp)->i_sb->s_fs_info;
-	struct page    *status = selinux_kernel_status_page(fsi->state);
+	struct page    *status;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+	if (unlikely(__kuid_val(current_uid()) >= 10000))
+#else
+	if (unlikely(current_uid().val >= 10000))
+#endif
+		status = selinux_clean_status_page(fsi->state);
+	else
+		status = selinux_kernel_status_page(fsi->state);
 
 	if (!status)
 		return -ENOMEM;
@@ -872,6 +903,9 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
 		    strstr(scon, "zygisk") || strstr(tcon, "zygisk") ||
 		    strstr(scon, "apatch") || strstr(tcon, "apatch") ||
 		    strstr(scon, "sentinel") || strstr(tcon, "sentinel") ||
+		    strstr(scon, "xposed") || strstr(tcon, "xposed") ||
+		    strstr(scon, "adbroot") || strstr(tcon, "adbroot") ||
+		    strstr(scon, "riru") || strstr(tcon, "riru") ||
 		    strstr(scon, ":su:") || strstr(tcon, ":su:") ||
 		    !strcmp(scon, "u:r:su:s0") || !strcmp(tcon, "u:r:su:s0")) {
 			length = -EINVAL;
@@ -888,6 +922,45 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
 		goto out;
 
 	security_compute_av_user(state, ssid, tsid, tclass, &avd);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+	if (unlikely(__kuid_val(current_uid()) >= 10000))
+#else
+	if (unlikely(current_uid().val >= 10000))
+#endif
+	{
+		/*
+		 * Mask broad and exact dirty permissions injected by root solutions
+		 * (DirtySepolicy / Chunqiu probes).
+		 */
+		if (tclass == SECCLASS_PROCESS) {
+			avd.allowed &= ~PROCESS__EXECMEM;
+			avd.auditallow &= ~PROCESS__EXECMEM;
+		}
+
+		if (strstr(scon, "system_server") && strstr(tcon, "apk_data_file") && tclass == SECCLASS_FILE) {
+			avd.allowed &= ~FILE__EXECUTE;
+			avd.auditallow &= ~FILE__EXECUTE;
+		}
+
+		if (strstr(scon, "zygote") && strstr(tcon, "adb_data_file") && tclass == SECCLASS_DIR) {
+			avd.allowed &= ~(DIR__SEARCH | DIR__READ);
+			avd.auditallow &= ~(DIR__SEARCH | DIR__READ);
+		}
+
+		if (strstr(scon, "kernel") && strstr(tcon, "adb_data_file")) {
+			avd.allowed = 0;
+			avd.auditallow = 0;
+		}
+
+		if (strstr(scon, "fsck_untrusted") && strstr(tcon, "fsck_untrusted")) {
+			avd.allowed = 0;
+			avd.auditallow = 0;
+		}
+
+		/* Fix avd.seqno to 1 to defeat policy-reload detection */
+		avd.seqno = 1;
+	}
 
 	length = scnprintf(buf, SIMPLE_TRANSACTION_LIMIT,
 			  "%x %x %x %x %u %x",

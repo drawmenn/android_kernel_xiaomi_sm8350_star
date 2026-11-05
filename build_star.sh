@@ -21,6 +21,9 @@ export READELF=llvm-readelf
 # Standardize compile user and host to official Android build identity to avoid container leak
 export KBUILD_BUILD_USER="${KBUILD_BUILD_USER:-android-build}"
 export KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST:-c3-miui-ota-bd174.bj}"
+export KBUILD_BUILD_VERSION="${KBUILD_BUILD_VERSION:-1}"
+export KBUILD_BUILD_TIMESTAMP="${KBUILD_BUILD_TIMESTAMP:-Wed May 8 16:00:00 CST 2024}"
+export KBUILD_COMPILER_STRING="${KBUILD_COMPILER_STRING:-Android (7284624, based on r416183b) clang version 12.0.5, LLD 12.0.5}"
 
 MAKE_ARGS=(
   O="$OUT_DIR"
