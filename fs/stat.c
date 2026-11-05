@@ -30,6 +30,37 @@ struct mount;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat);
+static inline void susfs_sanitize_tmp_kstat(const struct path *path, struct kstat *stat)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+	if (likely(__kuid_val(current_uid()) < 10000))
+#else
+	if (likely(current_uid().val < 10000))
+#endif
+		return;
+
+	if (path && path->dentry && path->dentry->d_name.name &&
+	    !strcmp(path->dentry->d_name.name, "tmp")) {
+		struct dentry *parent = path->dentry->d_parent;
+		if (parent && parent->d_name.name && !strcmp(parent->d_name.name, "local")) {
+			struct dentry *grandparent = parent->d_parent;
+			if (grandparent && grandparent->d_name.name && !strcmp(grandparent->d_name.name, "data")) {
+				/*
+				 * Inode for /data/local/tmp: detector checks if ino > 10000.
+				 * On clean stock builds it is typically < 1000 (e.g. 156).
+				 */
+				if (stat->ino > 1000)
+					stat->ino = 156;
+				/* Enforce stock standard shell:shell ownership and 0771 mode */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+				stat->uid = make_kuid(current_user_ns(), 2000);
+				stat->gid = make_kgid(current_user_ns(), 2000);
+#endif
+				stat->mode = (stat->mode & S_IFMT) | 0771;
+			}
+		}
+	}
+}
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 extern int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt);
@@ -108,8 +139,10 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 	{
 		int err = inode->i_op->getattr(path, stat, request_mask,
 					    query_flags);
-		if (!err)
+		if (!err) {
 			susfs_sus_kstat_spoof_generic_fillattr(inode, stat);
+			susfs_sanitize_tmp_kstat(path, stat);
+		}
 		return err;
 	}
 #else
@@ -118,6 +151,9 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 #endif
 
 	generic_fillattr(inode, stat);
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	susfs_sanitize_tmp_kstat(path, stat);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(vfs_getattr_nosec);

@@ -30,6 +30,7 @@
 #include <linux/uaccess.h>
 #include <linux/kobject.h>
 #include <linux/ctype.h>
+#include <linux/version.h>
 
 /* selinuxfs pseudo filesystem for exporting the security policy API.
    Based on the proc code and the fs/nfsd/nfsctl.c code. */
@@ -603,6 +604,22 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
 	if (length)
 		goto out;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+	if (unlikely(__kuid_val(current_uid()) >= 10000))
+#else
+	if (unlikely(current_uid().val >= 10000))
+#endif
+	{
+		/* Block detectors probing injected Root/hook contexts */
+		if (strnstr(buf, "ksu", size) || strnstr(buf, "magisk", size) ||
+		    strnstr(buf, "lsposed", size) || strnstr(buf, "zygisk", size) ||
+		    strnstr(buf, "apatch", size) || strnstr(buf, ":su:", size) ||
+		    strnstr(buf, "sentinel", size)) {
+			length = -EINVAL;
+			goto out;
+		}
+	}
+
 	length = security_context_to_sid(state, buf, size, &sid, GFP_KERNEL);
 	if (length)
 		goto out;
@@ -838,6 +855,29 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
 	length = -EINVAL;
 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
 		goto out;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+	if (unlikely(__kuid_val(current_uid()) >= 10000))
+#else
+	if (unlikely(current_uid().val >= 10000))
+#endif
+	{
+		/*
+		 * If untrusted app probes root / hooking domains, return -EINVAL
+		 * exactly as on an untampered stock system where these types do not exist.
+		 */
+		if (strstr(scon, "ksu") || strstr(tcon, "ksu") ||
+		    strstr(scon, "magisk") || strstr(tcon, "magisk") ||
+		    strstr(scon, "lsposed") || strstr(tcon, "lsposed") ||
+		    strstr(scon, "zygisk") || strstr(tcon, "zygisk") ||
+		    strstr(scon, "apatch") || strstr(tcon, "apatch") ||
+		    strstr(scon, "sentinel") || strstr(tcon, "sentinel") ||
+		    strstr(scon, ":su:") || strstr(tcon, ":su:") ||
+		    !strcmp(scon, "u:r:su:s0") || !strcmp(tcon, "u:r:su:s0")) {
+			length = -EINVAL;
+			goto out;
+		}
+	}
 
 	length = security_context_str_to_sid(state, scon, &ssid, GFP_KERNEL);
 	if (length)

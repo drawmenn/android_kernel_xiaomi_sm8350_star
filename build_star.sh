@@ -18,6 +18,10 @@ export OBJDUMP=llvm-objdump
 export STRIP=llvm-strip
 export READELF=llvm-readelf
 
+# Standardize compile user and host to official Android build identity to avoid container leak
+export KBUILD_BUILD_USER="${KBUILD_BUILD_USER:-android-build}"
+export KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST:-c3-miui-ota-bd174.bj}"
+
 MAKE_ARGS=(
   O="$OUT_DIR"
   ARCH="$ARCH"
@@ -177,6 +181,7 @@ fi
 
 # The pinned builtin Root consumes compile.h. Generate it through the kernel's
 # original producer before a clean parallel build; do not copy a302 header.
+rm -f "$OUT_DIR/include/generated/compile.h"
 make "${MAKE_ARGS[@]}" init/version.o
 make -j"$JOBS" "${MAKE_ARGS[@]}" Image.gz dtbs modules
 
