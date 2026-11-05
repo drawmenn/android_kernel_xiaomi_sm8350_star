@@ -14,6 +14,7 @@
 #include <linux/version.h>
 #include <linux/fdtable.h>
 #include <linux/statfs.h>
+#include <linux/security.h>
 #include <linux/random.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
@@ -28,6 +29,8 @@
 extern bool susfs_is_current_ksu_domain(void);
 extern void setup_selinux(const char *domain, struct cred *cred);
 extern struct cred *ksu_cred;
+extern int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt);
+extern struct vfsmount *susfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt);
 
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 DEFINE_STATIC_KEY_TRUE(susfs_is_log_enabled);
@@ -76,17 +79,17 @@ void susfs_add_sus_path(void __user **user_info) {
 			info.err = -ENOENT;
 			goto out_path_put_path;
 		}
-		set_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state);
-		set_bit(AS_FLAGS_SUS_PATH, &inode->i_state);
-		SUSFS_LOGI("flagged AS_FLAGS_SUS_PATH on pathname: '%s', fi->nodeid: %llu, fi->inode.i_ino: %lu, fi->inode.i_state: 0x%lx\n",
-					info.target_pathname, fi->nodeid, fi->inode.i_ino, fi->inode.i_state);
+		set_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_mapping->flags);
+		set_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags);
+		SUSFS_LOGI("flagged AS_FLAGS_SUS_PATH on pathname: '%s', fi->nodeid: %llu, fi->inode.i_ino: %lu, fi->inode.i_mapping->flags: 0x%lx\n",
+					info.target_pathname, fi->nodeid, fi->inode.i_ino, fi->inode.i_mapping->flags);
 		info.err = 0;
 		goto out_path_put_path;
 	}
 
-	set_bit(AS_FLAGS_SUS_PATH, &inode->i_state);
-	SUSFS_LOGI("flagged AS_FLAGS_SUS_PATH on pathname: '%s', ino: '%lu', inode->i_state: 0x%lx\n",
-				info.target_pathname, inode->i_ino, inode->i_state);
+	set_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags);
+	SUSFS_LOGI("flagged AS_FLAGS_SUS_PATH on pathname: '%s', ino: '%lu', inode->i_mapping->flags: 0x%lx\n",
+				info.target_pathname, inode->i_ino, inode->i_mapping->flags);
 	info.err = 0;
 out_path_put_path:
 	path_put(&path);
@@ -117,8 +120,8 @@ void susfs_add_sus_path_loop(void __user **user_info) {
 		info.err = -ENOMEM;
 		goto out_copy_to_user;
 	}
-	strncpy(new_list->info.target_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
-	strncpy(new_list->target_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+	strscpy(new_list->info.target_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+	strscpy(new_list->target_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
 	INIT_LIST_HEAD(&new_list->list);
 	mutex_lock(&susfs_mutex_lock_sus_path);
 	list_add_tail_rcu(&new_list->list, &LH_SUS_PATH_LOOP);
@@ -156,14 +159,14 @@ static void susfs_run_sus_path_loop(void) {
 					path_put(&path);
 					continue;
 				}
-				set_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state);
-				set_bit(AS_FLAGS_SUS_PATH, &inode->i_state);
-				SUSFS_LOGI("re-flag AS_FLAGS_SUS_PATH on path '%s', fi->inode.i_ino: '%lu', fi->inode.i_state: 0x%lx\n",
-						cursor->target_pathname, fi->inode.i_ino, fi->inode.i_state);
+				set_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_mapping->flags);
+				set_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags);
+				SUSFS_LOGI("re-flag AS_FLAGS_SUS_PATH on path '%s', fi->inode.i_ino: '%lu', fi->inode.i_mapping->flags: 0x%lx\n",
+						cursor->target_pathname, fi->inode.i_ino, fi->inode.i_mapping->flags);
 			} else {
-				set_bit(AS_FLAGS_SUS_PATH, &inode->i_state);
-				SUSFS_LOGI("re-flag AS_FLAGS_SUS_PATH on path '%s', inode->i_ino: '%lu', inode->i_state: 0x%lx\n",
-						cursor->target_pathname, inode->i_ino, inode->i_state);
+				set_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags);
+				SUSFS_LOGI("re-flag AS_FLAGS_SUS_PATH on path '%s', inode->i_ino: '%lu', inode->i_mapping->flags: 0x%lx\n",
+						cursor->target_pathname, inode->i_ino, inode->i_mapping->flags);
 			}
 			path_put(&path);
 		}
@@ -200,13 +203,13 @@ bool susfs_is_inode_sus_path(struct inode *inode)
 			return false;
 		}
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state) &&
+		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_mapping->flags) &&
 			is_i_uid_not_allowed(i_uid_into_vfsuid(idmap, &fi->inode).val)))
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
-		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state) &&
+		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_mapping->flags) &&
 			is_i_uid_not_allowed(i_uid_into_mnt(i_user_ns(&fi->inode), &fi->inode).val)))
 #else
-		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state) &&
+		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_mapping->flags) &&
 			is_i_uid_not_allowed(fi->inode.i_uid.val)))
 #endif
 		{
@@ -216,13 +219,13 @@ bool susfs_is_inode_sus_path(struct inode *inode)
 		return false;
 	}
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_state) &&
+	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags) &&
 		is_i_uid_not_allowed(i_uid_into_vfsuid(idmap, inode).val)))
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
-	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_state) &&
+	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags) &&
 		is_i_uid_not_allowed(i_uid_into_mnt(i_user_ns(inode), inode).val)))
 #else
-	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_state) &&
+	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags) &&
 		is_i_uid_not_allowed(inode->i_uid.val)))
 #endif
 	{
@@ -265,12 +268,30 @@ out_copy_to_user:
 /* sus_kstat */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 static DEFINE_MUTEX(susfs_mutex_lock_sus_kstat);
+
+static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
+{
+	int retval;
+
+	if (!dentry->d_sb->s_op->statfs)
+		return -ENOSYS;
+
+	memset(buf, 0, sizeof(*buf));
+	retval = security_sb_statfs(dentry);
+	if (retval)
+		return retval;
+	retval = dentry->d_sb->s_op->statfs(dentry, buf);
+	if (retval == 0 && buf->f_frsize == 0)
+		buf->f_frsize = buf->f_bsize;
+	return retval;
+}
 static DEFINE_HASHTABLE(SUS_KSTAT_HLIST, 10);
 
-static int susfs_mark_inode_sus_kstat(char *target_pathname, struct st_susfs_sus_kstat_hlist *new_entry) {
+static int susfs_mark_inode_sus_kstat(char *target_pathname, struct st_susfs_sus_kstat_hlist *new_entry, bool is_update) {
 	struct path path;
 	struct inode *inode = NULL;
 	struct fuse_inode *fi = NULL;
+	struct vfsmount *no_sus_vfsmnt = NULL;
 	int err = 0;
 
 	err = kern_path(target_pathname, 0, &path);
@@ -293,24 +314,45 @@ static int susfs_mark_inode_sus_kstat(char *target_pathname, struct st_susfs_sus
 			err = -ENOENT;
 			goto out_path_put_path;
 		}
-		set_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state);
-		new_entry->is_fuse = true;
-		new_entry->target_dev = fi->inode.i_sb->s_dev;
-		SUSFS_LOGI("flagged AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, fi->inode.i_sb->s_dev: %u, fi->nodeid: %llu, fi->inode.i_ino: %lu, fi->inode.i_state: 0x%lx\n",
-					target_pathname, new_entry->is_fuse, fi->inode.i_sb->s_dev, fi->nodeid, fi->inode.i_ino, fi->inode.i_state);
-		err = 0;
+		if (is_update) {
+			new_entry->info.spoofed_size = d_backing_inode(path.dentry)->i_size;
+		} else {
+			new_entry->is_fuse = true;
+			new_entry->target_dev = fi->inode.i_sb->s_dev;
+			new_entry->spoofed_mnt_id = susfs_get_non_sus_mnt_id_from_mnt(real_mount(path.mnt));
+			no_sus_vfsmnt = susfs_get_non_sus_vfsmnt_from_vfsmnt(path.mnt);
+			err = statfs_by_dentry(no_sus_vfsmnt->mnt_root, &new_entry->spoofed_kstatfs);
+			dput(no_sus_vfsmnt->mnt_root);
+			mntput(no_sus_vfsmnt);
+			if (err)
+				goto out_path_put_path;
+		}
+		set_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_mapping->flags);
+		SUSFS_LOGI("marked AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, fi->inode.i_sb->s_dev: %u, fi->nodeid: %llu, fi->inode.i_ino: %lu, fi->inode.i_mapping->flags: 0x%lx, spoofed_mnt_id: '%d'\n",
+				target_pathname, new_entry->is_fuse, fi->inode.i_sb->s_dev, fi->nodeid, fi->inode.i_ino, fi->inode.i_mapping->flags, new_entry->spoofed_mnt_id);
 		goto out_path_put_path;
 	}
 
-	set_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state);
-	new_entry->is_fuse = false;
-	new_entry->target_dev = inode->i_sb->s_dev;
-	SUSFS_LOGI("flagged AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, inode->i_sb->s_dev: %u,  inode->i_ino: %lu, inode->i_state: 0x%lx\n",
-				target_pathname, new_entry->is_fuse, inode->i_sb->s_dev, inode->i_ino, inode->i_state);
+	if (is_update) {
+		new_entry->info.spoofed_size = d_backing_inode(path.dentry)->i_size;
+	} else {
+		new_entry->is_fuse = false;
+		new_entry->target_dev = inode->i_sb->s_dev;
+		new_entry->spoofed_mnt_id = susfs_get_non_sus_mnt_id_from_mnt(real_mount(path.mnt));
+		no_sus_vfsmnt = susfs_get_non_sus_vfsmnt_from_vfsmnt(path.mnt);
+		err = statfs_by_dentry(no_sus_vfsmnt->mnt_root, &new_entry->spoofed_kstatfs);
+		dput(no_sus_vfsmnt->mnt_root);
+		mntput(no_sus_vfsmnt);
+		if (err)
+			goto out_path_put_path;
+	}
+	set_bit(AS_FLAGS_SUS_KSTAT, &inode->i_mapping->flags);
+	SUSFS_LOGI("marked AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, inode->i_sb->s_dev: %u,  inode->i_ino: %lu, inode->i_mapping->flags: 0x%lx, spoofed_mnt_id: '%d'\n",
+				target_pathname, new_entry->is_fuse, inode->i_sb->s_dev, inode->i_ino, inode->i_mapping->flags, new_entry->spoofed_mnt_id);
 
 out_path_put_path:
 	path_put(&path);
-	return 0;
+	return err;
 }
 
 void susfs_add_sus_kstat(void __user **user_info) {
@@ -351,7 +393,7 @@ void susfs_add_sus_kstat(void __user **user_info) {
 	mutex_lock(&susfs_mutex_lock_sus_kstat);
 	hash_for_each_possible_safe(SUS_KSTAT_HLIST, tmp_entry, tmp_hlist_node, node, info.target_ino) {
 		if (!strcmp(tmp_entry->info.target_pathname, info.target_pathname)) {
-			info.err = susfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry);
+			info.err = susfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry, false);
 			if (info.err) {
 				mutex_unlock(&susfs_mutex_lock_sus_kstat);
 				kfree(new_entry);
@@ -387,7 +429,7 @@ void susfs_add_sus_kstat(void __user **user_info) {
 	}
 
 	// if no duplicated, add it to list
-	info.err = susfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry);
+	info.err = susfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry, false);
 	if (info.err) {
 		mutex_unlock(&susfs_mutex_lock_sus_kstat);
 		kfree(new_entry);
@@ -454,7 +496,7 @@ void susfs_update_sus_kstat(void __user **user_info) {
 			new_entry->target_dev = tmp_entry->target_dev;
 			new_entry->is_fuse = tmp_entry->is_fuse;
 			new_entry->info.target_ino = info.target_ino;
-			info.err = susfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry);
+			info.err = susfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry, true);
 			if (info.err) {
 				mutex_unlock(&susfs_mutex_lock_sus_kstat);
 				kfree(new_entry);
@@ -481,6 +523,32 @@ out_copy_to_user:
 	SUSFS_LOGI("CMD_SUSFS_UPDATE_SUS_KSTAT -> ret: %d\n", info.err);
 }
 
+__attribute__((hot)) bool susfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse) {
+	struct fuse_inode *fi = NULL;
+
+	if (!inode)
+		return false;
+	if (inode->i_sb->s_magic == FUSE_SUPER_MAGIC) {
+		fi = get_fuse_inode(inode);
+		if (!fi || !fi->inode.i_mapping) {
+			SUSFS_LOGE("fi || fi->inode.i_mapping is NULL\n");
+			return false;
+		}
+		if (test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_mapping->flags)) {
+			*out_is_fuse = true;
+			return true;
+		}
+		return false;
+	}
+	if (!inode->i_mapping) {
+		SUSFS_LOGE("inode->i_mapping is NULL\n");
+		return false;
+	}
+	if (test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_mapping->flags))
+		return true;
+	return false;
+}
+
 void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat)
 {
 	struct st_susfs_sus_kstat_hlist *entry = NULL;
@@ -495,7 +563,7 @@ void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *s
 			SUSFS_LOGE("fi || fi->inode.i_mapping is NULL\n");
 			return;
 		}
-		if (!test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state) ||
+		if (!test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_mapping->flags) ||
 			!susfs_is_current_proc_umounted_app())
 			return;
 		target_ino = fi->inode.i_ino;
@@ -509,7 +577,7 @@ void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *s
 		return;
 	}
 
-	if (!test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state) ||
+	if (!test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_mapping->flags) ||
 	    !susfs_is_current_proc_umounted_app())
 		return;
 
@@ -568,7 +636,7 @@ void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, uns
 			SUSFS_LOGE("fi || fi->inode.i_mapping is NULL\n");
 			return;
 		}
-		if (!test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state) ||
+		if (!test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_mapping->flags) ||
 			!susfs_is_current_proc_umounted_app())
 			return;
 		target_ino = fi->inode.i_ino;
@@ -582,7 +650,7 @@ void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, uns
 		return;
 	}
 
-	if (!test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state) ||
+	if (!test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_mapping->flags) ||
 		!susfs_is_current_proc_umounted_app())
 		return;
 
@@ -598,6 +666,60 @@ out_spoof_kstat:
 			SUSFS_LOGI("spoofing kstat for target_ino: %lu, target_dev: %u\n", target_ino, target_dev);
 			*out_dev = entry->info.spoofed_dev;
 			*out_ino = entry->info.spoofed_ino;
+			rcu_read_unlock();
+			return;
+		}
+	}
+	rcu_read_unlock();
+}
+int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, bool *is_fuse) {
+	struct st_susfs_sus_kstat_hlist *entry = NULL;
+	struct inode *target_inode = inode;
+
+	if (*is_fuse)
+		target_inode = &get_fuse_inode(inode)->inode;
+
+	rcu_read_lock();
+	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, target_inode->i_ino) {
+		if (entry->target_dev == inode->i_sb->s_dev)
+		{
+			SUSFS_LOGI("spoofing kstat for vfs_statfs, target_ino: %lu, target_dev: %u\n", target_inode->i_ino, target_inode->i_sb->s_dev);
+			memcpy(buf, &entry->spoofed_kstatfs, sizeof(struct kstatfs));
+			rcu_read_unlock();
+			return 0;
+		}
+	}
+	rcu_read_unlock();
+	return -EINVAL;
+}
+
+void susfs_sus_kstat_spoof_inotify_fdinfo(unsigned long *out_target_ino, dev_t *out_target_dev) {
+	struct st_susfs_sus_kstat_hlist *entry = NULL;
+
+	rcu_read_lock();
+	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, *out_target_ino) {
+		if (entry->target_dev == *out_target_dev)
+		{
+			SUSFS_LOGI("spoofing kstat for inotify_fdinfo, target_ino: %lu, target_dev: %u\n", *out_target_ino, *out_target_dev);
+			*out_target_ino = entry->info.spoofed_ino;
+			*out_target_dev = entry->info.spoofed_dev;
+			rcu_read_unlock();
+			return;
+		}
+	}
+	rcu_read_unlock();
+}
+
+void susfs_sus_kstat_spoof_proc_fd_seq_show(int *out_target_mnt_id, unsigned long *out_target_ino, dev_t target_dev) {
+	struct st_susfs_sus_kstat_hlist *entry = NULL;
+
+	rcu_read_lock();
+	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, *out_target_ino) {
+		if (entry->target_dev == target_dev)
+		{
+			SUSFS_LOGI("spoofing kstat for proc_fd_seq_show, target_ino: %lu, target_dev: %u\n", *out_target_ino, target_dev);
+			*out_target_mnt_id = entry->spoofed_mnt_id;
+			*out_target_ino = entry->info.spoofed_ino;
 			rcu_read_unlock();
 			return;
 		}
@@ -855,8 +977,8 @@ void susfs_add_open_redirect(void __user **user_info) {
 	new_entry_redirected->reversed_lookup_only = true;
 	new_entry_redirected->spoofed_mnt_id = real_mount(target_path.mnt)->mnt_id;
 	memcpy(&new_entry_redirected->spoofed_kstatfs, &new_entry_target->spoofed_kstatfs, sizeof(struct kstatfs));
-	strncpy(new_entry_redirected->info.target_pathname, info.redirected_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
-	strncpy(new_entry_redirected->info.redirected_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+	strscpy(new_entry_redirected->info.target_pathname, info.redirected_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+	strscpy(new_entry_redirected->info.redirected_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
 
 	// check for existing entries, delete it first if so
 	mutex_lock(&susfs_mutex_lock_open_redirect);
@@ -891,8 +1013,8 @@ void susfs_add_open_redirect(void __user **user_info) {
 		hash_add_rcu(OPEN_REDIRECT_HLIST, &new_entry_target->node, new_entry_target->target_ino);
 		hash_add_rcu(OPEN_REDIRECT_HLIST, &new_entry_redirected->node, new_entry_redirected->target_ino);
 		// we need to mark both target and redirected path inode just for spoofing readlink as well
-		set_bit(AS_FLAGS_OPEN_REDIRECT, &redirected_inode->i_state);
-		set_bit(AS_FLAGS_OPEN_REDIRECT, &target_inode->i_state);
+		set_bit(AS_FLAGS_OPEN_REDIRECT, &redirected_inode->i_mapping->flags);
+		set_bit(AS_FLAGS_OPEN_REDIRECT, &target_inode->i_mapping->flags);
 		mutex_unlock(&susfs_mutex_lock_open_redirect);
 		synchronize_rcu();
 		if (is_second_dup_found)
@@ -909,8 +1031,8 @@ void susfs_add_open_redirect(void __user **user_info) {
 	hash_add_rcu(OPEN_REDIRECT_HLIST, &new_entry_target->node, new_entry_target->target_ino);
 	hash_add_rcu(OPEN_REDIRECT_HLIST, &new_entry_redirected->node, new_entry_redirected->target_ino);
 	// we need to mark both target and redirected path inode just for spoofing readlink as well
-	set_bit(AS_FLAGS_OPEN_REDIRECT, &redirected_inode->i_state);
-	set_bit(AS_FLAGS_OPEN_REDIRECT, &target_inode->i_state);
+	set_bit(AS_FLAGS_OPEN_REDIRECT, &redirected_inode->i_mapping->flags);
+	set_bit(AS_FLAGS_OPEN_REDIRECT, &target_inode->i_mapping->flags);
 	mutex_unlock(&susfs_mutex_lock_open_redirect);
 	info.err = 0;
 
@@ -1013,7 +1135,7 @@ int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_bu
 				srcu_read_unlock(&susfs_srcu_open_redirect, srcu_idx);
 				return -ENAMETOOLONG;
 			}
-			strncpy(tmp_buf, entry->info.redirected_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+			strscpy(tmp_buf, entry->info.redirected_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
 			srcu_read_unlock(&susfs_srcu_open_redirect, srcu_idx);
 			return 0;
 		}
@@ -1116,7 +1238,7 @@ void susfs_add_sus_map(void __user **user_info) {
 		info.err = -ENOENT;
 		goto out_path_put_path;
 	}
-	set_bit(AS_FLAGS_SUS_MAP, &inode->i_state);
+	set_bit(AS_FLAGS_SUS_MAP, &inode->i_mapping->flags);
 	SUSFS_LOGI("pathname: '%s', is flagged as AS_FLAGS_SUS_MAP\n", info.target_pathname);
 	info.err = 0;
 out_path_put_path:
