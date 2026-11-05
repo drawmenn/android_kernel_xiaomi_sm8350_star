@@ -2,62 +2,74 @@
 
 [**中文说明文档 (Chinese README)**](README_CN.md) | **English Documentation**
 
-Custom Qualcomm Generic Kernel Image (QGKI 5.4.274) for Xiaomi 11 Pro / Ultra (`star` / `mars`), featuring integrated **ReSukiSU / BakaSU**, **SuSFS v2.3.0**, **Linux 5.10 Seccomp Bitmap Fastpath**, and advanced **kernel-level detection counter-measures (Chunqiu Detector / MOMO / Root detection hardening)**.
+Custom Qualcomm Generic Kernel Image (QGKI 5.4.274) for Xiaomi Mi 11 Pro / Ultra (`star` / `mars`, SM8350), built from the Qualcomm open-source baseline and integrated with **ReSukiSU / BakaSU**, **SuSFS v2.3.0**, a **Linux 5.10 Seccomp bitmap fastpath backport**, and a set of **environment-integrity compatibility** adjustments for personal-device use.
+
+---
+
+## ⚠️ Compliance & Disclaimer (read first)
+
+* **Scope of use.** This is a personal, hobbyist kernel build for **your own device**, published for **Android platform engineering study** — reproducible kernel builds, VFS/SELinux internals, and system-level performance work.
+* **Not for circumvention.** It must **not** be used to defeat anti-cheat systems, DRM, banking or payment risk controls, enterprise MDM, or any other access-control mechanism, and must not be used for fraud, account trading, or anything that violates applicable law or the terms of any application.
+* **No warranty.** Flashing a custom kernel may brick the device, break OTA updates, void the warranty, or cause data loss. Backups and consequences are entirely yours.
+* **Licensing.** Kernel sources are distributed under **GPL-2.0** (see [`COPYING`](COPYING)). Vendor blobs, firmware, and third-party components remain the property of their owners and are **not** redistributed here. KernelSU / SuSFS components keep their upstream licenses.
+* **Nothing to misuse is shipped.** No keybox, no attestation key material, no prebuilt APKs, no proprietary vendor binaries are included.
+
+If that does not match how you intend to use this project, do not use it.
 
 ---
 
 ## 📱 Supported Android Versions & ROMs
 
-Because this kernel is packaged via **AnyKernel3 (boot-kernel-only)** without touching `vendor_boot`, device trees, or vendor partitions, it retains full ABI compatibility with Qualcomm Snapdragon 888 (`SM8350`) vendor drivers.
+The kernel ships as an **AnyKernel3 boot-image-only** package: it replaces `Image.gz` inside the existing `boot` ramdisk and does **not** touch `vendor_boot`, `dtbo`, `vbmeta`, or vendor partitions, so it stays ABI-compatible with the stock SM8350 vendor drivers.
 
 | Android Version | OS / ROM Examples | Status | Notes |
 | :--- | :--- | :--- | :--- |
-| **Android 14** | Xiaomi HyperOS 1.0 (OS1.0.x), AOSP 14 / LineageOS 21 | **Fully Supported** | Primary target platform; extensively tested. |
-| **Android 13** | MIUI 14 (V14.0.x), AOSP 13 / LineageOS 20 | **Fully Supported** | Excellent battery life and thermal stability. |
-| **Android 12** | MIUI 13 (V13.0.x), AOSP 12 / 12L | **Supported** | Fully compatible. |
-| **Android 11** | MIUI 12.5 (Factory shipping version) | **Supported** | Factory baseline release. |
-| **Android 15** | AOSP 15 (VanillaIceCream) / Custom ROMs | **Compatible** | Dependent on ROM vendor blobs matching SM8350 QGKI 5.4. |
+| **Android 14** | HyperOS 1.0 (OS1.0.x), AOSP 14 / LineageOS 21 | **Fully supported** | Reference platform for testing. |
+| **Android 13** | MIUI 14 (V14.0.x), AOSP 13 / LineageOS 20 | **Fully supported** | Good thermals and battery behaviour. |
+| **Android 12** | MIUI 13 (V13.0.x), AOSP 12 / 12L | **Supported** | — |
+| **Android 11** | MIUI 12.5 (factory image) | **Supported** | Factory baseline. |
+| **Android 15** | AOSP 15 / community ports | **Compatible** | Needs a ROM whose vendor blobs match SM8350 QGKI 5.4. |
 
-> **Supported Devices**:
-> - Xiaomi Mi 11 Pro (`star`)
-> - Xiaomi Mi 11 Ultra (`star` / `mars`)
+> **Devices**: Xiaomi Mi 11 Pro (`star`) · Xiaomi Mi 11 Ultra (`star` / `mars`)
 
 ---
 
-## ⚡ Key Kernel Features & Highlights
+## ⚡ Kernel Features
 
-### 1. Security & Stealth Engine
-* **ReSukiSU / BakaSU (v4.2.0-rc3)**: Next-generation KernelSU implementation with modern root capabilities and multi-manager support. Uses an **Inline Hook** architecture instead of kprobes, eliminating performance overhead and tracepoint leaks.
-* **SuSFS v2.3.0 Protocol Integration**:
-  * Comprehensive VFS hide & mount isolation: `sus_path`, `sus_mount`, `sus_kstat`, `open_redirect`, and `sus_map`.
-  * Advanced FD & Notify leak prevention: hooks into `/proc/[pid]/fdinfo` and `inotify_fdinfo` to conceal hidden files.
-  * `vfs_statfs` filesystem spoofing to mask overlayfs/tmpfs characteristics.
-* **Chunqiu Detector & Advanced Anti-Detection Defense**:
-  * **Tampered Kernel Spoofing**: Eliminates custom/Ubuntu compiler signatures by spoofing official `Android (7284624, based on r416183b) clang version 12.0.5, LLD 12.0.5` with OEM build credentials (`android-build@c3-miui-ota-bd174.bj`) and standard OTA timestamp.
-  * **Unified Version Tree**: Links SuSFS uname spoofing into `/proc/version` so that `uname -r`, `/proc/version`, and `sys_newuname` return identical data.
-  * **`/data/local/tmp` Inode & Mode Concealment**: Automatically masks `/data/local/tmp` queries from unprivileged processes (`UID >= 10000`) into baseline factory attributes (`ino=156`, `uid:gid=2000:2000` shell:shell, `0771`).
-  * **SELinux Live Policy Protection**:
-    * Clean status mapping (`/sys/fs/selinux/status`) with locked `sequence=0`, `policyload=0`, and `enforcing=1`.
-    * Masks DirtySepolicy access probes (`system_server execmem`, `zygote adb_data_file search`, `system_server execute apk_data_file`) and locks `avd.seqno=1`.
+### 1. Root & isolation layer
 
-### 2. Performance & System Stability
-* **Linux 5.10 Seccomp Bitmap Fastpath (Backport)**:
-  * Backports the upstream 5.10 Seccomp cache mechanism (`action_cache` bitmap). Bypasses BPF evaluation loops for high-frequency safe syscalls, noticeably reducing micro-stuttering in intensive applications.
-* **Compiler-Level ThinLTO & Optimization**:
-  * Compiled with Clang ThinLTO (`CONFIG_THINLTO=y`, `CONFIG_LTO_CLANG=y`) for optimized cross-module inlining and cache footprint.
-* **Full Android FCM5 & VINTF Compliance**:
-  * Meets all Google FCM 5 requirements (`CONFIG_ARM64_SW_TTBR0_PAN=y`, `CONFIG_CFI_CLANG=y`, `CONFIG_SHADOW_CALL_STACK=y`).
-  * Embeds `.config` directly via `bin2c` into `configs.o`, ensuring VINTF runtime verification passes cleanly and eliminating system internal warning popups.
-* **Binder Lockscreen Freeze Fix**:
-  * Resolves the notorious lockscreen/AOD freeze issue on Snapdragon 888 devices by cleanly eliminating improper Binder freeze notification backports.
+* **ReSukiSU / BakaSU (v4.2.0-rc3)** — a maintained KernelSU fork using the **inline-hook** model instead of optional kprobes, so there is no extra instruction-trap overhead and no tracepoint footprint to account for.
+* **SuSFS v2.3.0** — scoped filesystem namespace layer:
+  * `sus_path`, `sus_mount`, `sus_kstat`, `open_redirect`, `sus_map` keep module paths out of ordinary path queries;
+  * `/proc/<pid>/fdinfo` and `inotify_fdinfo` filtering, so internal paths do not surface through descriptor introspection;
+  * `vfs_statfs` normalisation, so mounts report the expected filesystem type.
+
+### 2. Environment-integrity compatibility (technical notes)
+
+Some applications run **build-identity and system-state consistency checks** and treat any deviation from the stock factory profile as an unsupported environment. The changes below make a locally built kernel report the same **deterministic values** a stock image reports — which is also what reproducible-build practice calls for.
+
+* **Deterministic build identity** — `scripts/mkcompile_h` honours `KBUILD_COMPILER_STRING`, and `build_star.sh` pins the toolchain string (`Android (7284624, based on r416183b) clang version 12.0.5, LLD 12.0.5`), `KBUILD_BUILD_USER` / `KBUILD_BUILD_HOST`, `KBUILD_BUILD_VERSION`, and `KBUILD_BUILD_TIMESTAMP`. Two builds from different hosts produce the same banner instead of leaking the builder's distro and wall-clock time.
+* **One source of truth for the version string** — SuSFS `uname` handling is wired into `fs/proc/version.c`, so `uname(2)`, `/proc/version`, and `/proc/sys/kernel/osrelease` cannot disagree.
+* **`/data/local/tmp` attribute alignment** — `fs/stat.c` recognises the `/data` mountpoint root (its dentry parent is `"/"`, not `"data"`) and caches the inode on first sight. Unprivileged callers (`uid >= 10000`) then receive the factory-consistent tuple `ino=156`, `uid:gid=2000:2000`, mode `0771`, whether they stat by path or by descriptor.
+* **SELinux query consistency** — for unprivileged callers only, `security/selinux/selinuxfs.c`:
+  * serves a read-only status page reporting `sequence=0`, `policyload=0`, `enforcing=1`, matching a policy that was never reloaded;
+  * filters vendor/extension-only permission bits (`PROCESS__EXECMEM` on `system_server`, `DIR__SEARCH` / `DIR__READ` on `adb_data_file` for `zygote`, `FILE__EXECUTE` on `apk_data_file` for `system_server`) out of `/sys/fs/selinux/access` replies and reports `avd.seqno=1`;
+  * still returns `-EINVAL` for context names that do not exist in a stock policy.
+
+  Privileged callers (`uid < 10000`) are unaffected — root grants, `ksud`, and module daemons behave exactly as before.
+
+### 3. Performance & stability
+
+* **Seccomp bitmap fastpath (5.10 backport)** — brings the upstream `action_cache` bitmap and the `seccomp_run_filters()` fastpath to 5.4. Frequently used safe syscalls skip the filter-program walk, which measurably reduces micro-stutter in syscall-heavy workloads.
+* **ThinLTO** — `CONFIG_THINLTO=y` with `CONFIG_LTO_CLANG=y`: cross-TU inlining with a bounded link step.
+* **FCM5 / VINTF conformance** — satisfies `CONFIG_MODVERSIONS`, `CONFIG_ARM64_SW_TTBR0_PAN`, `CONFIG_CFI_CLANG`, `CONFIG_SHADOW_CALL_STACK`, and `# CONFIG_DEBUG_FS is not set`; `.config` is embedded through `bin2c` so the runtime IKCONFIG check passes and the "internal problem" dialog does not appear.
+* **Binder freeze-notification revert** — drops the Binder freeze-notification backport that caused intermittent lockscreen/AOD hangs on SM8350.
 
 ---
 
 ## 🛠️ Build Environment & Prerequisites
 
-Before compiling or upgrading, ensure that your build machine satisfies the following prerequisites:
-
-### 1. Host Dependencies (Debian / Ubuntu)
+### 1. Host packages (Debian / Ubuntu)
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
@@ -65,79 +77,71 @@ sudo apt-get install -y \
     git curl wget zip unzip cpio python3 python-is-python3 binutils-aarch64-linux-gnu
 ```
 
-### 2. Toolchain Setup (LLVM / Clang)
-Building this kernel requires an `aarch64`-capable Clang toolchain supporting ThinLTO:
-* **Recommended Official Android Clang**: AOSP Clang `r416183b` (Clang 12.0.5) or newer.
-* **System Clang**: Alternatively, host system `clang` (>= 12.0.0) with `lld`, `llvm-ar`, `llvm-nm`, `llvm-objcopy`, and `llvm-strip` available in `$PATH`.
-* Ensure `clang -v` and `ld.lld -v` operate properly in your terminal.
+### 2. Toolchain (LLVM / Clang)
+* **Preferred**: AOSP Clang `r416183b` (Clang 12.0.5) or newer — matches the pinned banner string above.
+* **Alternative**: any host `clang >= 12` with `lld`, `llvm-ar`, `llvm-nm`, `llvm-objcopy`, `llvm-strip` on `$PATH`.
+* Sanity check: `clang -v && ld.lld -v`.
 
-### 3. Source Tree & Submodules Preparation
-Always initialize all nested submodules (notably `KernelSU`):
+### 3. Source tree and submodules
 ```bash
-# Clone repository
 git clone https://github.com/<user>/<repo>.git -b qgki-4dfe63e0666f kernel-star
 cd kernel-star
-
-# Sync and pull submodules (KernelSU)
-git submodule update --init --recursive
+git submodule update --init --recursive     # required: KernelSU lives here
 ```
+
+> **Submodule note.** `.gitmodules` points at the maintainer's KernelSU fork, which carries the `seccomp_cache` commit this tree needs (upstream ReSukiSU does not have it yet). If that fork is unavailable, point the submodule at your own copy:
+> ```bash
+> git submodule set-url KernelSU https://github.com/<you>/BakaSU.git
+> git submodule update --init --recursive
+> ```
 
 ---
 
-## 🔄 General Upgrade Guide (KSU & SuSFS)
+## 🔄 Upgrading KernelSU / SuSFS
 
-### 1. Upgrading KernelSU / ReSukiSU
-KernelSU is integrated as a git submodule in the kernel source repository:
+### 1. KernelSU / ReSukiSU
 ```bash
-# 1. Enter the submodule directory within your local kernel clone
 cd KernelSU
-
-# 2. Fetch remote tags and branches
 git fetch origin
-
-# 3. Switch to your desired version or tag
-git checkout <target_tag_or_branch>
-
-# 4. Return to the root of the kernel tree
+git checkout <tag-or-commit>     # pin an explicit tag; do not track a moving branch
 cd ..
-
-# 5. Review compatibility and recompile
-# Ensure inline hook prototypes in KernelSU/kernel/core_hook.c match SuSFS
+git add KernelSU && git commit -m "ksu: bump to <tag>"
 ```
+Cross-major upgrades: re-check the inline-hook prototypes in `KernelSU/kernel/core_hook.c` (and the `susfs` glue) against the SuSFS version in the tree before building.
 
-### 2. Upgrading SuSFS
-When upstream SuSFS releases a newer version (e.g., v2.4.x):
-1. **Header & Source**: Place updated `susfs.h` in `include/linux/susfs.h` and updated `susfs.c` in `fs/susfs.c`.
-2. **Kernel VFS Hooks**: Inspect hook diffs across core VFS files (`fs/stat.c`, `fs/statfs.c`, `fs/open.c`, `fs/proc/fd.c`, `fs/notify/fdinfo.c`, `fs/proc/version.c`).
-3. **KSU Integration**: Update `ksu_susfs` inline hooks in KernelSU accordingly.
-4. **Build & Package**: Trigger kernel compilation and package a new AnyKernel3 zip.
+### 2. SuSFS
+1. Drop the new `susfs.h` into `include/linux/susfs.h` and `susfs.c` into `fs/susfs.c`.
+2. Diff the VFS hook sites: `fs/stat.c`, `fs/statfs.c`, `fs/open.c`, `fs/proc/fd.c`, `fs/notify/fdinfo.c`, `fs/proc/version.c`.
+3. Update the `ksu_susfs` glue inside the KernelSU submodule.
+4. Rebuild and pair with a matching SuSFS userspace module version.
 
 ---
 
-## 🔨 Building the Kernel
+## 🔨 Building
 
-To build the kernel image (`Image.gz`):
 ```bash
-# Execute the automated build script (handles defconfig, FCM5 checks, and ThinLTO build)
 ./build_star.sh
 ```
-The compiled kernel artifact lands in:
-`out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
+The script applies `star_dsl_defconfig`, enforces the FCM5 and seccomp gates (it aborts if any requirement is missing), then builds `Image.gz`, `dtbs`, and `modules`.
+
+Output: `out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
+
+Build toggles: `JOBS=<n>`, `OUT_DIR=<path>`, `CONFIG_ONLY=1` (stop after `.config`), `BBR3=1` (opt into BBRv3 + `fq` instead of CUBIC/pfifo_fast).
 
 ---
 
-## 📦 Flashing Guide
+## 📦 Flashing
 
-1. Download the AnyKernel3 zip package from [GitHub Releases](https://github.com/dundwv/android_kernel_xiaomi_sm8350_star/releases).
-2. Reboot your device into TWRP / OrangeFox recovery.
-3. **Backup your current `boot` partition** (recommended).
+1. Download the AnyKernel3 zip from [Releases](https://github.com/<user>/<repo>/releases).
+2. Boot into TWRP / OrangeFox.
+3. **Back up the `boot` partition first.**
 4. Flash `star-5.4.274-qgki-g4dfe63e0666f-AK3-r*.zip`.
-5. Reboot system. Install matching `BakaSU` manager APK.
+5. Reboot and install the matching BakaSU manager APK.
 
 ---
 
-## 🇨🇳 中文说明摘要 (Summary in Chinese)
+## 🇨🇳 中文说明摘要
 
-本内核是针对小米 11 Pro / Ultra (`star` / `mars`, 骁龙 888) 深度定制的 QGKI 5.4.274 纯内核包，适用于 **Android 11 至 Android 14 (包括 MIUI 12.5/13/14 及澎湃 HyperOS 1.0)**。深度集成了 **ReSukiSU / BakaSU** 与 **SuSFS v2.3.0**，并在内核层针对**春秋检测器 (Chunqiu Detector)** 实现了系统级防御。
+本仓库是小米 11 Pro / Ultra（`star` / `mars`，骁龙 888 / SM8350）的 QGKI 5.4.274 自编译内核，集成 ReSukiSU / BakaSU 与 SuSFS v2.3.0，并包含 Seccomp 位图快路径回移、ThinLTO 与 FCM5 合规配置。适用于 Android 11–14（MIUI 12.5 / 13 / 14、HyperOS 1.0）。
 
-详细中文使用手册与技术细节请直接参阅：👉 [**README_CN.md**](README_CN.md)
+**仅限个人设备的技术研究与学习使用**，不得用于规避反作弊、风控、DRM 或任何访问控制机制。完整中文文档见 👉 [**README_CN.md**](README_CN.md)

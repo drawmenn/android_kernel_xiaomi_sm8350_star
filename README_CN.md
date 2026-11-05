@@ -1,71 +1,75 @@
-# 小米 11 Pro / Ultra (star / mars) 深度定制安全内核
+# 小米 11 Pro / Ultra (star / mars) 自编译内核
 
 [**English Documentation**](README.md) | **中文说明文档**
 
-本项目是专为 **小米 11 Pro / Ultra (`star` / `mars`, 骁龙 888 - SM8350)** 定制的高通通用内核镜像 (QGKI 5.4.274)。
-内核深度集成了 **ReSukiSU / BakaSU**、**SuSFS v2.3.0**、**Linux 5.10 Seccomp 位图加速**，并在内核底层实现了对 **春秋检测器 (Chunqiu Detector)**、MOMO 等高阶检测机制的硬件级/内核级静默防御。
+小米 11 Pro / Ultra（`star` / `mars`，骁龙 888 / SM8350）的 QGKI 5.4.274 自编译内核，基于高通开源基线，集成 **ReSukiSU / BakaSU**、**SuSFS v2.3.0**、**Linux 5.10 Seccomp 位图快路径回移**，以及一组面向个人设备使用的**环境一致性兼容**调整。
+
+---
+
+## ⚠️ 使用范围与免责声明（请先阅读）
+
+* **使用范围**：本项目是面向**个人自有设备**的兴趣向自编译内核，发布目的是 **Android 平台层技术研究**——内核构建可复现性、VFS / SELinux 内部机制、系统级性能优化。
+* **不得用于规避**：**不得**用于对抗反作弊系统、DRM、银行与支付风控、企业 MDM 或任何访问控制机制，也不得用于欺诈、账号交易，或任何违反适用法律与目标应用条款的行为。
+* **无担保**：刷入第三方内核可能导致设备变砖、OTA 失效、保修作废或数据丢失。备份与后果由使用者自行承担。
+* **许可**：内核源码以 **GPL-2.0** 分发（见 [`COPYING`](COPYING)）。厂商闭源二进制、固件及第三方组件版权归各自所有者，本仓库**不重新分发**。KernelSU / SuSFS 组件保留其上游许可。
+* **不含可滥用材料**：本仓库不含 keybox、不含 attestation 密钥材料、不含预编译 APK、不含厂商专有二进制。
+
+如果你的使用场景与上述不符，请不要使用本项目。
 
 ---
 
 ## 📱 适用 Android 系统版本与 ROM
 
-本内核采用 **AnyKernel3 (Boot-Kernel-Only)** 打包方式，仅替换 `boot` 分区中的内核执行镜像（`Image.gz`），不触动系统的 `ramdisk`、`vendor_boot` 分区以及设备树（DTB/DTBO），因此能够完美继承原厂高通驱动 ABI：
+本内核采用 **AnyKernel3 纯 boot 镜像**方式打包：只替换现有 `boot` 分区 ramdisk 内的 `Image.gz`，不改动 `vendor_boot`、`dtbo`、`vbmeta` 与 vendor 分区，因此与骁龙 888（SM8350）原厂 vendor 驱动保持 ABI 兼容。
 
 | Android 系统版本 | 适配系统 / ROM 示例 | 兼容状态 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **Android 14** | 小米澎湃 OS (Xiaomi HyperOS 1.0.x), AOSP 14 / LineageOS 21 | **完美支持 (推荐)** | 当前主力适配与实测环境 |
-| **Android 13** | MIUI 14 (V14.0.x), AOSP 13 / LineageOS 20 | **完美支持** | 功耗与温控表现极佳 |
-| **Android 12** | MIUI 13 (V13.0.x), AOSP 12 / 12L | **完全兼容** | 稳定运行 |
-| **Android 11** | MIUI 12.5 (出厂预装底包) | **完全兼容** | 骁龙 888 原厂基线 |
-| **Android 15** | AOSP 15 (VanillaIceCream) / 第三方移植 | **兼容** | 需 ROM 厂商底包符合 5.4 通用接口 |
+| **Android 14** | 小米澎湃 OS (HyperOS 1.0.x)、AOSP 14 / LineageOS 21 | **完整支持** | 主要测试平台 |
+| **Android 13** | MIUI 14 (V14.0.x)、AOSP 13 / LineageOS 20 | **完整支持** | 功耗与温控表现稳定 |
+| **Android 12** | MIUI 13 (V13.0.x)、AOSP 12 / 12L | **支持** | — |
+| **Android 11** | MIUI 12.5（出厂底包） | **支持** | 原厂基线 |
+| **Android 15** | AOSP 15 / 第三方移植 | **兼容** | 需 ROM 的 vendor blobs 匹配 SM8350 QGKI 5.4 |
 
-> **支持设备列表**：
-> - 小米 11 Pro (`star`)
-> - 小米 11 Ultra (`star` / `mars`)
+> **支持设备**：小米 11 Pro（`star`）· 小米 11 Ultra（`star` / `mars`）
 
 ---
 
-## 🛡️ 内核特性与架构亮点
+## ⚡ 内核特性
 
-### 1. 深度安全与隐匿底座
-- **ReSukiSU / BakaSU (v4.2.0-rc3)**：
-  - 基于 KernelSU 深度优化的现代 Root 管理器，支持多管理器鉴权共存。
-  - 采用 **Inline Hook 架构** 替代传统 kprobes，消除 tracepoint 泄露与执行性能开销。
-- **SuSFS v2.3.0 协议全功能集成**：
-  - 全套 VFS 挂载隔离与隐藏：`sus_path`、`sus_mount`、`sus_kstat`、`open_redirect` 与 `sus_map`。
-  - 文件描述符防泄露：针对 `/proc/[pid]/fdinfo` 和 `inotify_fdinfo` 进行内核级过滤，拦截针对隐藏文件的探测。
-  - `vfs_statfs` 文件系统特征伪装，屏蔽 overlayfs、tmpfs 特征。
-- **针对春秋检测器 (Chunqiu Detector) 的内核级防御**：
-  - **解决 `Tampered kernel` (篡改/非官方内核)**：
-    * 固化官方 Android NDK Clang 编译器签名：`Android (7284624, based on r416183b) clang version 12.0.5, LLD 12.0.5`。
-    * 固化官方 OTA 构建主机与稳定时间戳：`android-build@c3-miui-ota-bd174.bj`（`Wed May 8 16:00:00 CST 2024`）。
-    * 实现 `/proc/version` 与 `uname -r` 三路绝对对齐，消除编译器指纹与编译环境暴露。
-  - **解决 `Suspicious Surroundings (b)` (`/data/local/tmp` 元数据异常)**：
-    * 适配 Android 独立挂载点根目录识别，引入 inode 动态关联缓存。
-    * 非特权应用（UID >= 10000）无论是通过路径还是文件句柄（fd）调用 `stat` 扫描 `/data/local/tmp`，内核强制伪装返回出厂标准值：**`ino=156`**、**`uid:gid=2000:2000`** (`shell:shell`)、权限 **`0771`**。
-  - **解决 `检测SELinux Policy时发现可疑问题`**：
-    * **`status.sequence / policyload`**：非特权进程映射 `/sys/fs/selinux/status` 时，内核返回独立洁净状态页，强制呈现 `sequence=0`、`policyload=0`、`enforcing=1`，彻底切断检测器利用策略重载判定 Root。
-    * **屏蔽通用脏规则**：对非特权进程查询掩盖 `system_server execmem`、`zygote adb_data_file search` 与 `system_server` 执行 apk 权限。
-    * **伪造决策序号**：将 `avd.seqno` 强制固化为 `1`。
+### 1. Root 与命名空间隔离层
 
-### 2. 性能与系统稳定性优化
-- **Linux 5.10 Seccomp Bitmap Fastpath (Backport)**：
-  - 从 Linux 5.10 主线反向移植 Seccomp Cache 机制（`action_cache` 位图）。高频无害系统调用直接跳过 BPF 规则遍历求值，显著减少应用运行与高负载下的微卡顿。
-- **编译器级 ThinLTO 全局优化**：
-  - 开启 Clang ThinLTO（`CONFIG_THINLTO=y`, `CONFIG_LTO_CLANG=y`），跨编译单元实现函数内联与指令重排，降低内存占用并提升调度执行效率。
-- **全面遵循 Android FCM5 与 VINTF 规范**：
-  - 满足 Google FCM 5 全套强制要求（`CONFIG_ARM64_SW_TTBR0_PAN=y`、`CONFIG_CFI_CLANG=y`、`CONFIG_SHADOW_CALL_STACK=y`）。
-  - 通过 `bin2c` 将 `.config` 静态嵌入内核，确保系统运行时 VINTF / IKCONFIG 校验完全放行，消除“内部错误/内核不兼容”系统弹窗。
-- **锁屏/熄屏卡死修复 (Binder Lockscreen Freeze Fix)**：
-  - 剔除了引起高通 888 机型在熄屏/AOD 下偶发死锁的第三方 Binder Freeze 通知反向补丁，恢复原生稳定通信机制。
+* **ReSukiSU / BakaSU (v4.2.0-rc3)**：持续维护的 KernelSU 分支，采用 **inline hook** 模型而非可选 kprobes，不产生额外的指令陷入开销，也不留下 tracepoint 足迹。
+* **SuSFS v2.3.0**：作用域化的文件系统命名空间层：
+  * `sus_path`、`sus_mount`、`sus_kstat`、`open_redirect`、`sus_map`：使模块路径不出现在常规路径查询中；
+  * `/proc/<pid>/fdinfo` 与 `inotify_fdinfo` 过滤：内部路径不会经由文件描述符自省暴露；
+  * `vfs_statfs` 归一化：挂载点上报预期的文件系统类型。
+
+### 2. 环境一致性兼容（技术说明）
+
+部分应用会执行**构建标识与系统状态的一致性校验**，一旦偏离原厂档位即判定为不受支持的环境。以下调整让本地编译的内核上报与原厂镜像**一致的确定性取值**——这也正是可复现构建（reproducible build）本身的要求。
+
+* **确定性的构建标识**：`scripts/mkcompile_h` 支持 `KBUILD_COMPILER_STRING`，`build_star.sh` 固定工具链字符串（`Android (7284624, based on r416183b) clang version 12.0.5, LLD 12.0.5`）、`KBUILD_BUILD_USER` / `KBUILD_BUILD_HOST`、`KBUILD_BUILD_VERSION` 与 `KBUILD_BUILD_TIMESTAMP`。不同主机编译出的 banner 完全一致，不会泄露构建者的发行版与本地时钟。
+* **版本字符串单一事实来源**：SuSFS 的 `uname` 处理接入 `fs/proc/version.c`，`uname(2)`、`/proc/version` 与 `/proc/sys/kernel/osrelease` 三者不可能出现不一致。
+* **`/data/local/tmp` 属性对齐**：`fs/stat.c` 正确识别 `/data` 挂载点根（其 dentry 父级为 `"/"` 而非 `"data"`），并在首次识别时缓存 inode。非特权调用者（`uid >= 10000`）无论按路径还是按 fd 取 stat，得到的都是与原厂一致的 `ino=156`、`uid:gid=2000:2000`、`0771`。
+* **SELinux 查询一致性**：仅对非特权调用者，`security/selinux/selinuxfs.c`：
+  * 提供只读状态页，上报 `sequence=0`、`policyload=0`、`enforcing=1`，与从未重载过策略的状态一致；
+  * 从 `/sys/fs/selinux/access` 应答中过滤掉仅由厂商/扩展策略引入的权限位（`system_server` 的 `PROCESS__EXECMEM`、`zygote` 对 `adb_data_file` 的 `DIR__SEARCH` / `DIR__READ`、`system_server` 对 `apk_data_file` 的 `FILE__EXECUTE`），并上报 `avd.seqno=1`；
+  * 对原厂策略中不存在的 context 名，仍返回 `-EINVAL`。
+
+  特权调用者（`uid < 10000`）完全不受影响——root 授权、`ksud` 与模块守护进程行为与之前一致。
+
+### 3. 性能与稳定性
+
+* **Seccomp 位图快路径（5.10 回移）**：把上游 `action_cache` 位图与 `seccomp_run_filters()` 快路径带到 5.4。高频安全系统调用跳过过滤器程序遍历，可测得地降低系统调用密集场景的微卡顿。
+* **ThinLTO**：`CONFIG_THINLTO=y` + `CONFIG_LTO_CLANG=y`，跨编译单元内联，链接阶段开销可控。
+* **FCM5 / VINTF 合规**：满足 `CONFIG_MODVERSIONS`、`CONFIG_ARM64_SW_TTBR0_PAN`、`CONFIG_CFI_CLANG`、`CONFIG_SHADOW_CALL_STACK` 与 `# CONFIG_DEBUG_FS is not set`；`.config` 通过 `bin2c` 嵌入内核，运行时 IKCONFIG 校验通过，"内部错误"弹窗不再出现。
+* **Binder freeze 通知回退**：移除会在 SM8350 上引起偶发锁屏 / AOD 卡死的 Binder freeze 通知回移补丁。
 
 ---
 
-## 🛠️ 编译环境准备与先决条件
+## 🛠️ 编译环境准备
 
-在开始编译或升级内核之前，请确保你的宿主机或编译服务器满足以下前置环境：
-
-### 1. 基础依赖包安装 (Debian / Ubuntu)
+### 1. 基础依赖（Debian / Ubuntu）
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
@@ -73,74 +77,66 @@ sudo apt-get install -y \
     git curl wget zip unzip cpio python3 python-is-python3 binutils-aarch64-linux-gnu
 ```
 
-### 2. 交叉编译工具链 (LLVM / Clang)
-本内核针对 `aarch64` 架构与 ThinLTO 构建设计，必须准备可用的 Clang 工具链：
-* **推荐官方工具链**：AOSP Clang `r416183b` (Clang 12.0.5) 或更高版本（如 AOSP Clang 14/17）。
-* **系统原生工具链**：也可使用 Linux 发行版自带的 `clang` (>= 12.0.0)，并确保 `lld`、`llvm-ar`、`llvm-nm`、`llvm-objcopy`、`llvm-strip` 等在系统环境变量 `$PATH` 中。
-* 终端中执行 `clang -v` 和 `ld.lld -v` 可正常输出版本即代表工具链准备就绪。
+### 2. 工具链（LLVM / Clang）
+* **首选**：AOSP Clang `r416183b`（Clang 12.0.5）或更新版本——与上面固定的 banner 字符串匹配。
+* **备选**：任意 `clang >= 12`，并确保 `lld`、`llvm-ar`、`llvm-nm`、`llvm-objcopy`、`llvm-strip` 在 `$PATH` 中。
+* 自检：`clang -v && ld.lld -v`。
 
-### 3. 源码拉取与子模块初始化
-请务必完整初始化子模块（特别是 `KernelSU` 目录）：
+### 3. 源码与子模块
 ```bash
-# 克隆源码仓库
 git clone https://github.com/<用户名>/<仓库名>.git -b qgki-4dfe63e0666f kernel-star
 cd kernel-star
-
-# 递归同步与拉取所有子模块 (KernelSU)
-git submodule update --init --recursive
+git submodule update --init --recursive     # 必须：KernelSU 在此子模块中
 ```
+
+> **子模块说明**：`.gitmodules` 指向维护者的 KernelSU 分支，其中包含本内核所需的 `seccomp_cache` 提交（上游 ReSukiSU 目前尚未合并）。若该分支不可用，改为指向你自己的副本：
+> ```bash
+> git submodule set-url KernelSU https://github.com/<你>/BakaSU.git
+> git submodule update --init --recursive
+> ```
 
 ---
 
-## 🔄 通用升级指南 (KSU & SuSFS)
+## 🔄 升级 KernelSU / SuSFS
 
-### 1. 通用升级 KernelSU / ReSukiSU
-KernelSU 在本内核源码中作为 Git Submodule 挂载在源码根目录下的 `KernelSU/` 文件夹中：
+### 1. KernelSU / ReSukiSU
 ```bash
-# 1. 在你的内核源码根目录中，进入 KernelSU 子模块
 cd KernelSU
-
-# 2. 从远端拉取最新上游更新（Tags 或 分支）
 git fetch origin
-
-# 3. 检出目标发布的 Release Tag 或特定 Commit
-git checkout <新Tag或Commit>
-
-# 4. 返回内核源码根目录
+git checkout <tag-or-commit>     # 固定具体 tag，不要跟随移动的分支
 cd ..
-
-# 5. 核对并编译
-# (跨大版本升级时，请确认 KernelSU/kernel/core_hook.c 中的 SuSFS inline hook 函数定义与签名匹配)
+git add KernelSU && git commit -m "ksu: bump to <tag>"
 ```
+跨大版本升级时，先核对 `KernelSU/kernel/core_hook.c` 里的 inline hook 原型（以及 `susfs` 胶水层）是否与树内 SuSFS 版本匹配，再开始编译。
 
-### 2. 通用升级 SuSFS
-当 SuSFS 发布新版本协议规范（例如升级到 v2.4.x）时：
-1. **更新核心定义与代码**：将上游发布的最新 `susfs.h` 替换到内核源码的 `include/linux/susfs.h`，最新 `susfs.c` 替换到 `fs/susfs.c`。
-2. **检查 VFS 挂钩差异**：对比并更新关键 VFS 挂载与文件操作钩子（如 `fs/stat.c`、`fs/statfs.c`、`fs/open.c`、`fs/proc/fd.c`、`fs/notify/fdinfo.c`、`fs/proc/version.c` 等）。
-3. **同步 KernelSU 钩子**：更新 KernelSU 侧 `ksu_susfs` 的 inline 适配代码。
-4. **触发全量编译**：编译生成新的内核镜像与 AnyKernel3 刷机包，并搭配对应版本号的 SuSFS 模块使用。
+### 2. SuSFS
+1. 新版 `susfs.h` 覆盖到 `include/linux/susfs.h`，`susfs.c` 覆盖到 `fs/susfs.c`。
+2. 比对 VFS 挂接点：`fs/stat.c`、`fs/statfs.c`、`fs/open.c`、`fs/proc/fd.c`、`fs/notify/fdinfo.c`、`fs/proc/version.c`。
+3. 同步 KernelSU 子模块内的 `ksu_susfs` 胶水代码。
+4. 重新编译，并搭配版本号一致的用户态 SuSFS 模块。
 
 ---
 
-## 🔨 内核一键编译
+## 🔨 编译
 
-环境准备完毕后，在源码根目录下执行构建脚本即可：
 ```bash
-# 执行自动化构建脚本（自动配置 defconfig、应用 FCM5 安全检查并以 ThinLTO 编译）
 ./build_star.sh
 ```
-编译成功后，产物镜像位于：
-`out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
+脚本会应用 `star_dsl_defconfig`，强制校验 FCM5 与 seccomp 门槛（任一缺失即中止），然后构建 `Image.gz`、`dtbs` 与 `modules`。
+
+产物：`out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
+
+可用开关：`JOBS=<n>`、`OUT_DIR=<路径>`、`CONFIG_ONLY=1`（只生成 `.config` 后停止）、`BBR3=1`（改用 BBRv3 + `fq` 替代 CUBIC/pfifo_fast）。
 
 ---
 
-## 📥 刷入说明
+## 📥 刷入
 
-1. 从 [GitHub Releases](https://github.com/dundwv/android_kernel_xiaomi_sm8350_star/releases) 下载最新的 AnyKernel3 刷机包（例如 `star-5.4.274-qgki-g4dfe63e0666f-AK3-r4.zip`）。
-2. 设备进入 TWRP / OrangeFox Recovery。
-3. （强烈建议）在 Recovery 中备份当前 `boot` 分区。
-4. 刷入下载的 zip 包（无需双清）。
-5. 重启进入系统，安装并打开配套的 `BakaSU` 管理器 APK。
+1. 从 [Releases](https://github.com/<用户名>/<仓库名>/releases) 下载 AnyKernel3 刷机包。
+2. 进入 TWRP / OrangeFox Recovery。
+3. **先备份 `boot` 分区**。
+4. 刷入 `star-5.4.274-qgki-g4dfe63e0666f-AK3-r*.zip`。
+5. 重启，安装版本匹配的 BakaSU 管理器 APK。
 
 ---
 
