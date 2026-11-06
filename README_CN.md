@@ -57,6 +57,7 @@
   * 对原厂策略中不存在的 context 名，仍返回 `-EINVAL`。
 
   特权调用者（`uid < 10000`）完全不受影响——root 授权、`ksud` 与模块守护进程行为与之前一致。
+* **UID 级优先级查询作用域限制** — `getpriority(PRIO_USER, …)`、`setpriority(PRIO_USER, …)`、`ioprio_get()` 与 `ioprio_set()` 可对任意 UID 查询"该 UID 是否有活跃进程"。`include/linux/uid_prio_filter.h` 将非特权跨应用 UID 查询限定为仅返回调用者自身 UID 的结果（返回 `-ESRCH`），使应用无法经由这些系统调用枚举其他应用的 UID。系统调用者（`uid < 10000`）与查询自身 UID 不受影响。
 
 ### 3. 性能与稳定性
 
@@ -84,7 +85,7 @@ sudo apt-get install -y \
 
 ### 3. 源码与子模块
 ```bash
-git clone https://github.com/drawmenn/android_kernel_xiaomi_star.git -b qgki-4dfe63e0666f kernel-star
+git clone https://github.com/drawmenn/android_kernel_xiaomi_sm8350_star.git -b 5.4.274-qgki-4dfe63e0666f kernel-star
 cd kernel-star
 git submodule update --init --recursive     # 必须：KernelSU 在此子模块中
 ```
@@ -132,7 +133,7 @@ git add KernelSU && git commit -m "ksu: bump to <tag>"
 
 ## 📥 刷入
 
-1. 从 [Releases](https://github.com/drawmenn/android_kernel_xiaomi_star/releases) 下载 AnyKernel3 刷机包。
+1. 从 [Releases](https://github.com/drawmenn/android_kernel_xiaomi_sm8350_star/releases) 下载 AnyKernel3 刷机包。
 2. 进入 TWRP / OrangeFox Recovery。
 3. **先备份 `boot` 分区**。
 4. 刷入 `star-5.4.274-qgki-g4dfe63e0666f-AK3-r*.zip`。

@@ -57,6 +57,7 @@ Some applications run **build-identity and system-state consistency checks** and
   * still returns `-EINVAL` for context names that do not exist in a stock policy.
 
   Privileged callers (`uid < 10000`) are unaffected — root grants, `ksud`, and module daemons behave exactly as before.
+* **Per-UID priority query scoping** — `getpriority(PRIO_USER, …)`, `setpriority(PRIO_USER, …)`, `ioprio_get()`, and `ioprio_set()` answer "does this UID have live processes?" for any UID. `include/linux/uid_prio_filter.h` scopes unprivileged cross-application-UID lookups to the caller's own UID (returns `-ESRCH`), so an application cannot enumerate other applications' UIDs through these syscalls. System callers (`uid < 10000`) and self-lookups are unaffected.
 
 ### 3. Performance & stability
 
@@ -84,7 +85,7 @@ sudo apt-get install -y \
 
 ### 3. Source tree and submodules
 ```bash
-git clone https://github.com/drawmenn/android_kernel_xiaomi_star.git -b qgki-4dfe63e0666f kernel-star
+git clone https://github.com/drawmenn/android_kernel_xiaomi_sm8350_star.git -b 5.4.274-qgki-4dfe63e0666f kernel-star
 cd kernel-star
 git submodule update --init --recursive     # required: KernelSU lives here
 ```
@@ -132,7 +133,7 @@ Build toggles: `JOBS=<n>`, `OUT_DIR=<path>`, `CONFIG_ONLY=1` (stop after `.confi
 
 ## 📦 Flashing
 
-1. Download the AnyKernel3 zip from [Releases](https://github.com/drawmenn/android_kernel_xiaomi_star/releases).
+1. Download the AnyKernel3 zip from [Releases](https://github.com/drawmenn/android_kernel_xiaomi_sm8350_star/releases).
 2. Boot into TWRP / OrangeFox.
 3. **Back up the `boot` partition first.**
 4. Flash `star-5.4.274-qgki-g4dfe63e0666f-AK3-r*.zip`.

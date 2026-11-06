@@ -43,6 +43,7 @@
 #include <linux/version.h>
 #include <linux/ctype.h>
 #include <linux/mm.h>
+#include <linux/uid_prio_filter.h>
 #include <linux/mempolicy.h>
 
 #include <linux/compat.h>
@@ -242,6 +243,8 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 		if (!who)
 			uid = cred->uid;
 		else if (!uid_eq(uid, cred->uid)) {
+			if (uid_prio_filter_hide(uid))
+				goto out_unlock;	/* Unprivileged cross-UID lookup, scope to self */
 			user = find_user(uid);
 			if (!user)
 				goto out_unlock;	/* No processes for this user */
@@ -310,6 +313,8 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 		if (!who)
 			uid = cred->uid;
 		else if (!uid_eq(uid, cred->uid)) {
+			if (uid_prio_filter_hide(uid))
+				goto out_unlock;	/* Unprivileged cross-UID lookup, scope to self */
 			user = find_user(uid);
 			if (!user)
 				goto out_unlock;	/* No processes for this user */
