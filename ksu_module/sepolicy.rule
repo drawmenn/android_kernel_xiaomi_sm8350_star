@@ -1,0 +1,2 @@
+allow ksu sysfs file { read write open getattr }
+allow magisk sysfs file { read write open getattr }

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#141218">
+<title>UID Path Filter</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top-bar">
+  <span class="ms app-icon" aria-hidden="true">shield</span>
+  <h1>UID Path Filter</h1>
+  <button class="icon-btn" id="btnRefresh" aria-label="刷新"><span class="ms">refresh</span></button>
+</header>
+
+<main class="content">
+  <div class="banner" id="banner">正在读取状态…</div>
+
+  <section class="card">
+    <div class="card-row clickable" id="btnTargetDlg">
+      <div class="card-head">
+        <span class="ms card-ic" style="--ic:#d0bcff">gps_fixed</span>
+        <div>
+          <h2>目标应用</h2>
+          <p class="sub" id="targetsSub">点击管理</p>
+        </div>
+      </div>
+      <span class="ms chevron">chevron_right</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-row clickable" id="btnPkgDlg">
+      <div class="card-head">
+        <span class="ms card-ic" style="--ic:#7fd0c8">apps</span>
+        <div>
+          <h2>隐藏应用</h2>
+          <p class="sub" id="pkgsSub">点击管理</p>
+        </div>
+      </div>
+      <span class="ms chevron">chevron_right</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-row clickable" id="btnRules">
+      <div class="card-head">
+        <span class="ms card-ic" style="--ic:#abc7ff">rule</span>
+        <div>
+          <h2>内核规则</h2>
+          <p class="sub" id="rulesSub">读取中…</p>
+        </div>
+      </div>
+      <span class="ms chevron">chevron_right</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-row clickable" id="btnDiag">
+      <div class="card-head">
+        <span class="ms card-ic" style="--ic:#f0b866">troubleshoot</span>
+        <div>
+          <h2>诊断</h2>
+          <p class="sub" id="diagSub">运行状态与日志</p>
+        </div>
+      </div>
+      <span class="ms chevron">chevron_right</span>
+    </div>
+  </section>
+
+  <div class="bottom-space"></div>
+</main>
+
+<div class="fab-wrap">
+  <button class="fab" id="btnApply">
+    <span class="ms">save</span><span id="applyLabel">保存并应用</span>
+  </button>
+</div>
+
+<div class="scrim" id="pickerScrim" hidden>
+  <div class="dialog">
+    <h3 id="pickerTitle">管理应用</h3>
+    <div class="search-row">
+      <span class="ms">search</span>
+      <input id="pickerSearch" placeholder="搜索已安装应用" autocomplete="off">
+    </div>
+    <div class="dialog-list" id="pickerList"></div>
+    <div class="manual-row">
+      <input id="manualInput" placeholder="或输入包名 com.example.app" autocomplete="off">
+      <button class="btn-tonal" id="manualAdd">添加</button>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-txt" id="pickerCancel">取消</button>
+      <button class="btn-filled" id="pickerOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="rulesScrim" hidden>
+  <div class="dialog">
+    <h3>内核当前规则</h3>
+    <p class="sub" id="rulesDlgSub"></p>
+    <pre class="code" id="rulesPre"></pre>
+    <div class="dialog-actions">
+      <button class="btn-txt" id="rulesClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="diagScrim" hidden>
+  <div class="dialog">
+    <h3>诊断</h3>
+    <p class="sub" id="diagInfo"></p>
+    <pre class="code" id="diagLog"></pre>
+    <div class="dialog-actions">
+      <button class="btn-txt" id="diagRefresh">刷新</button>
+      <button class="btn-txt" id="diagClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="snackbar" id="snackbar" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
