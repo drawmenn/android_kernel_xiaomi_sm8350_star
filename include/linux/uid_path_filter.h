@@ -30,9 +30,9 @@
 
 #ifdef CONFIG_UID_PATH_FILTER
 
-#define UID_PATH_FILTER_MAX_ENTRIES	32
+#define UID_PATH_FILTER_MAX_ENTRIES	256
 #define UID_PATH_FILTER_MAX_LEN		256
-#define UID_PATH_FILTER_MAX_WRAP		8
+#define UID_PATH_FILTER_MAX_WRAP		256
 
 /*
  * Readdir wrapper state.  A stack-allocated instance lives for the duration
@@ -43,7 +43,7 @@ struct uid_path_filter_dir {
 	struct dir_context ctx;		/* actor = uid_path_filter_filldir */
 	struct dir_context *orig;	/* caller's real context */
 	int n;
-	int idx[UID_PATH_FILTER_MAX_WRAP];
+	unsigned short idx[UID_PATH_FILTER_MAX_WRAP];
 };
 
 bool uid_path_filter_check_name(const char *name);
