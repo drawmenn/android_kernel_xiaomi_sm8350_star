@@ -58,6 +58,7 @@
 
   特权调用者（`uid < 10000`）完全不受影响——root 授权、`ksud` 与模块守护进程行为与之前一致。
 * **UID 级优先级查询作用域限制** — `getpriority(PRIO_USER, …)`、`setpriority(PRIO_USER, …)`、`ioprio_get()` 与 `ioprio_set()` 可对任意 UID 查询"该 UID 是否有活跃进程"。`include/linux/uid_prio_filter.h` 将非特权跨应用 UID 查询限定为仅返回调用者自身 UID 的结果（返回 `-ESRCH`），使应用无法经由这些系统调用枚举其他应用的 UID。系统调用者（`uid < 10000`）与查询自身 UID 不受影响。
+* **UID 级路径访问作用域限制**（`CONFIG_UID_PATH_FILTER`）— 路径解析与目录枚举可对任意调用者回答"某路径是否存在"。每条配置（UID， 路径后缀）——经 `/sys/kernel/uid_path_filter/config` 管理——使匹配后缀（组件对齐）的路径对该 UID 解析为 `-ENOENT`，并在目录枚举结果中省略匹配条目。其他调用者（包括路径所属应用自身）不受影响。比较时忽略零宽字符（`U+200B/200C/200D/FEFF`）；后缀匹配对外部存储树的各挂载别名（`/storage/emulated/<user>`、`/storage/self/primary`、`/sdcard`）行为一致。配套的模块 zip（见 release 资产）在开机时注入 SELinux 放行规则并应用配置。
 
 ### 3. 性能与稳定性
 

@@ -15,6 +15,7 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/fsnotify.h>
+#include <linux/uid_path_filter.h>
 #include <linux/dirent.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
@@ -65,12 +66,17 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 
 	res = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
-		ctx->pos = file->f_pos;
+		struct dir_context *use_ctx = ctx;
+		struct uid_path_filter_dir wrapper;
+
+		if (uid_path_filter_wrap_dir(file, ctx, &wrapper))
+			use_ctx = &wrapper.ctx;
+		use_ctx->pos = file->f_pos;
 		if (shared)
-			res = file->f_op->iterate_shared(file, ctx);
+			res = file->f_op->iterate_shared(file, use_ctx);
 		else
-			res = file->f_op->iterate(file, ctx);
-		file->f_pos = ctx->pos;
+			res = file->f_op->iterate(file, use_ctx);
+		file->f_pos = use_ctx->pos;
 		fsnotify_access(file);
 		file_accessed(file);
 	}

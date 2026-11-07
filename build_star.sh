@@ -107,6 +107,7 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
   --enable KSU_SUSFS_OPEN_REDIRECT \
   --enable KSU_SUSFS_SUS_MAP \
+  --enable UID_PATH_FILTER \
   --enable KALLSYMS \
   --enable KALLSYMS_ALL \
   --enable BPF_STREAM_PARSER \
@@ -174,6 +175,13 @@ grep -qx '# CONFIG_KSU_TRACEPOINT_HOOK is not set' "$OUT_DIR/.config" || {
 }
 grep -qx '# CONFIG_KSU_MANUAL_HOOK is not set' "$OUT_DIR/.config" || {
   echo "KSU hook mode invalid: manual hook conflicts with SUSFS inline hook" >&2
+  exit 2
+}
+
+# Per-UID path access scoping: the directory-probing defence needs the
+# sysfs interface at /sys/kernel/uid_path_filter/config to be built in.
+grep -qx "CONFIG_UID_PATH_FILTER=y" "$OUT_DIR/.config" || {
+  echo "UID_PATH_FILTER not enabled in .config" >&2
   exit 2
 }
 

@@ -58,6 +58,7 @@ Some applications run **build-identity and system-state consistency checks** and
 
   Privileged callers (`uid < 10000`) are unaffected — root grants, `ksud`, and module daemons behave exactly as before.
 * **Per-UID priority query scoping** — `getpriority(PRIO_USER, …)`, `setpriority(PRIO_USER, …)`, `ioprio_get()`, and `ioprio_set()` answer "does this UID have live processes?" for any UID. `include/linux/uid_prio_filter.h` scopes unprivileged cross-application-UID lookups to the caller's own UID (returns `-ESRCH`), so an application cannot enumerate other applications' UIDs through these syscalls. System callers (`uid < 10000`) and self-lookups are unaffected.
+* **Per-UID path access scoping** (`CONFIG_UID_PATH_FILTER`) — pathname resolution and directory listings answer "does this path exist?" for any caller. Each configured (UID, path-suffix) pair — managed at `/sys/kernel/uid_path_filter/config` — makes pathnames ending in that suffix (component-aligned) resolve to `-ENOENT` and omits the matching entries from directory listings, for that UID only. Other callers, including the path's owner, are unaffected. Zero-width characters (`U+200B/200C/200D/FEFF`) are skipped on both sides of every comparison, and suffix matching treats the mount aliases of the external-storage tree (`/storage/emulated/<user>`, `/storage/self/primary`, `/sdcard`) identically. A companion module zip in the release applies the SELinux allow rule and the rules at boot.
 
 ### 3. Performance & stability
 

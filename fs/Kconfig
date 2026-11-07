@@ -114,6 +114,18 @@ source "fs/crypto/Kconfig"
 
 source "fs/verity/Kconfig"
 
+config UID_PATH_FILTER
+	bool "Per-UID path access scoping"
+	default y
+	help
+	  This option scopes pathname resolution per caller UID: a configured
+	  (UID, path-suffix) pair makes pathnames ending in that suffix, and
+	  the matching directory entries, resolve to -ENOENT for that UID
+	  only.  Other callers, including the owner of the path, are
+	  unaffected.  Zero-width characters (U+200B, U+200C, U+200D,
+	  U+FEFF) are ignored during comparison.  The configuration lives at
+	  /sys/kernel/uid_path_filter/config (root only).
+
 source "fs/notify/Kconfig"
 
 source "fs/quota/Kconfig"

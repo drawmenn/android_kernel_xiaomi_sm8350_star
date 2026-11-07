@@ -24,6 +24,7 @@
 #include <linux/pagemap.h>
 #include <linux/fsnotify.h>
 #include <linux/personality.h>
+#include <linux/uid_path_filter.h>
 #include <linux/security.h>
 #include <linux/ima.h>
 #include <linux/syscalls.h>
@@ -2676,6 +2677,8 @@ int filename_lookup(int dfd, struct filename *name, unsigned flags,
 	struct nameidata nd;
 	if (IS_ERR(name))
 		return PTR_ERR(name);
+	if (uid_path_filter_check_name(name->name))
+		return -ENOENT;	/* Unprivileged cross-UID lookup, scope to self */
 	if (unlikely(root)) {
 		nd.root = *root;
 		flags |= LOOKUP_ROOT;
@@ -4001,6 +4004,10 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	struct nameidata nd;
 	int flags = op->lookup_flags;
 	struct file *filp;
+
+	if (!IS_ERR(pathname) &&
+	    uid_path_filter_check_name(pathname->name))
+		return ERR_PTR(-ENOENT);	/* Unprivileged cross-UID lookup, scope to self */
 
 	set_nameidata(&nd, dfd, pathname);
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
