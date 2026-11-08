@@ -329,8 +329,9 @@ input { font: inherit; color: inherit; }
 }
 .li:last-child { border-bottom: 0; }
 .li .ms { font-size: 22px; color: var(--primary); flex: none; }
-.li .pkg { flex: 1; min-width: 0; font-size: .88rem; overflow-wrap: break-word; }
-.li .uid { color: var(--on-surface-var); font-size: .78rem; flex: none; }
+.li-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.li-label { font-size: .95rem; color: var(--on-surface); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li-pkg { font-size: .76rem; color: var(--on-surface-var); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .manual-row { display: flex; gap: 8px; padding: 12px 0 4px; }
 .manual-row input {

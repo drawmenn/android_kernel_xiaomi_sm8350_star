@@ -3,6 +3,7 @@
 #   control.sh init             seed the config with defaults
 #   control.sh status           state, config, live kernel rules
 #   control.sh apps             installed user apps (pkg uid lines)
+#   control.sh labels           installed apps with display names (JSON)
 #   control.sh save <base64>    replace the config (base64 payload)
 #   control.sh apply            resolve target UIDs and write kernel rules
 #   control.sh log              tail of the apply log
@@ -22,7 +23,7 @@ CONFIG="$STORE/config"
 LOG="$STORE/apply.log"
 CFG=/sys/kernel/uid_path_filter/config
 SLOTS=256
-VERSION=v4.0
+VERSION=v4.1
 
 [ "$(id -u)" = 0 ] || { echo "ERR: root required"; exit 1; }
 mkdir -p "$STORE"
@@ -97,6 +98,30 @@ cmd_status() {
 cmd_apps() {
     echo "OK"
     pm list packages -3 -U 2>/dev/null | sed -n 's/^package:\([^ ]*\) uid:\([0-9]*\)$/\1 \2/p'
+}
+
+# Installed apps with display names, via the bundled appnames.dex helper
+# (runs under app_process and talks to the package manager directly).
+# Falls back to an empty list so the WebUI can degrade to package names.
+cmd_labels() {
+    echo "OK"
+    DEX="$MODDIR/appnames.dex"
+    OUT="$STORE/.upf_labels.json"
+    APP_PROCESS=""
+    for p in /system/bin/app_process64 /system/bin/app_process; do
+        [ -x "$p" ] && { APP_PROCESS="$p"; break; }
+    done
+    [ -z "$APP_PROCESS" ] && APP_PROCESS=app_process
+    if [ -f "$DEX" ]; then
+        CLASSPATH="$DEX" "$APP_PROCESS" /system/bin AppNames "$OUT" 2>/dev/null
+        if [ -s "$OUT" ]; then
+            cat "$OUT"
+            rm -f "$OUT"
+            return
+        fi
+    fi
+    rm -f "$OUT" 2>/dev/null
+    echo "[]"
 }
 
 cmd_log() {
@@ -243,9 +268,10 @@ case "${1:-}" in
     init)        cmd_init ;;
     status)      cmd_status ;;
     apps)        cmd_apps ;;
+    labels)      cmd_labels ;;
     log)         cmd_log ;;
     save)        cmd_save "${2:-}" ;;
     apply)       cmd_apply ;;
     update_desc) cmd_update_desc ;;
-    *)           echo "ERR: usage: control.sh init|status|apps|log|save <b64>|apply|update_desc"; exit 1 ;;
+    *)           echo "ERR: usage: control.sh init|status|apps|labels|log|save <b64>|apply|update_desc"; exit 1 ;;
 esac

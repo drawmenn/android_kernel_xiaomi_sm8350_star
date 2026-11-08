@@ -31,7 +31,7 @@ KernelSU 配套模块，用于管理自定义内核中的按 UID 路径可见性
 ```sh
 zip -r uid_path_filter_rules.zip \
   module.prop customize.sh control.sh service.sh \
-  sepolicy.rule magiskpolicy webroot
+  sepolicy.rule magiskpolicy appnames.dex webroot
 ```
 
 将生成的 ZIP 在 Root 管理器中刷入。
@@ -41,10 +41,11 @@ zip -r uid_path_filter_rules.zip \
 ```
 ├── module.prop         模块元数据
 ├── customize.sh        安装时权限修复（应对 BakaSU 的 0644 安装权限）
-├── control.sh          命令后端（init/status/apps/save/apply/log/update_desc）
+├── control.sh          命令后端（init/status/apps/labels/save/apply/log/update_desc）
 ├── service.sh          开机自动应用，30 次重试
 ├── sepolicy.rule       SELinux 授权规则（供支持安装时应用的管理器使用；BakaSU 在开机时注入等效规则）
 ├── magiskpolicy        arm64 SELinux 策略工具（源码中不含，见上文）
+├── appnames.dex        应用显示名称辅助工具（源码中不含——release ZIP 已包含；改自开源 UID- 项目）
 └── webroot/
     ├── index.html      WebUI 标记
     ├── style.css       Material Design 3 主题（深色/浅色自适应）
@@ -65,6 +66,10 @@ zip -r uid_path_filter_rules.zip \
 开机时，`service.sh` 以 2 秒间隔重试应用最多 30 次，等待包管理器就绪，
 随后将当前状态写入 `module.prop` 的描述字段（如 `✓ 4 rules active`），
 使 Root 管理器的模块列表直接反映运行状态。
+
+WebUI 的应用选择器以应用显示名称列出已安装应用（通过内置的
+`appnames.dex` 在 `app_process` 下运行，失败时回退为包名），并将
+当前已选条目排在列表最上方。
 
 ## 配置
 

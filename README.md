@@ -32,7 +32,7 @@ which already includes the binary.
 ```sh
 zip -r uid_path_filter_rules.zip \
   module.prop customize.sh control.sh service.sh \
-  sepolicy.rule magiskpolicy webroot
+  sepolicy.rule magiskpolicy appnames.dex webroot
 ```
 
 Flash the resulting ZIP in your root manager.
@@ -42,10 +42,11 @@ Flash the resulting ZIP in your root manager.
 ```
 ├── module.prop         Module metadata
 ├── customize.sh        Install-time permissions fix (BakaSU 0644 workaround)
-├── control.sh          Command backend (init/status/apps/save/apply/log/update_desc)
+├── control.sh          Command backend (init/status/apps/labels/save/apply/log/update_desc)
 ├── service.sh          Boot-time auto-apply with 30× retry loop
 ├── sepolicy.rule       SELinux allow rules (applied at install by managers that support them; BakaSU injects the same rules live at boot)
 ├── magiskpolicy        Arm64 SELinux policy tool (not in source — see above)
+├── appnames.dex        App display-name helper for the picker (not in source — the release ZIP includes it; adapted from the open-source UID- project)
 └── webroot/
     ├── index.html      WebUI markup
     ├── style.css       Material Design 3 theme (dark/light auto)
@@ -70,6 +71,11 @@ On boot, `service.sh` retries apply up to 30 times (2-second intervals)
 to wait for the package manager to come up, then updates the module
 description in `module.prop` with the live status (e.g. `✓ 4 rules
 active`) so the root manager's module list reflects the current state.
+
+The WebUI picker lists installed apps with their display names (via the
+bundled `appnames.dex` helper running under `app_process`, falling back
+to package names) and keeps the currently selected entries sorted to the
+top of the list.
 
 ## Configuration
 

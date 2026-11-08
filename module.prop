@@ -1,6 +1,6 @@
 id=uid_path_filter_rules
 name=UID Path Filter Rules
-version=v4.0
-versionCode=8
+version=v4.1
+versionCode=9
 author=drawmenn
 description=Per-UID path visibility rules with Material Design WebUI, verified apply and on-device diagnostics

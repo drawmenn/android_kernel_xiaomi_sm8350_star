@@ -27,9 +27,9 @@ function run(args) { return exec('sh ' + CONTROL + ' ' + args); }
 
 var state = {
     targets: [], pkgs: [], apps: null,
-    uidMap: {}, rules: [],
+    uidMap: {}, rules: [], labels: {},
     sysfs: '?', writable: '?', kernel: '', module: '',
-    dirty: false
+    dirty: false, labelsLoaded: false
 };
 
 function $(id) { return document.getElementById(id); }
@@ -151,6 +151,10 @@ async function refresh() {
 var pickerMode = 't';
 var pickerSel = {};
 
+function labelOf(pkg) {
+    return state.labels[pkg] || pkg;
+}
+
 async function ensureApps() {
     if (state.apps) return;
     var r = await run('apps');
@@ -163,21 +167,39 @@ async function ensureApps() {
     }
 }
 
+async function ensureLabels() {
+    if (state.labelsLoaded) return;
+    var r = await run('labels');
+    state.labels = {};
+    if (r.out.indexOf('OK') === 0) {
+        var body = r.out.slice(r.out.indexOf('\n') + 1);
+        try {
+            JSON.parse(body).forEach(function (a) {
+                if (a && a.pkg) state.labels[a.pkg] = a.label || a.pkg;
+            });
+        } catch (e) { /* fall back to package names */ }
+    }
+    state.labelsLoaded = true;
+}
+
 function li(pkg, uid) {
     var b = document.createElement('button');
     b.className = 'li';
     var ic = document.createElement('span');
     ic.className = 'ms';
     ic.textContent = pickerSel[pkg] ? 'check_box' : 'check_box_outline_blank';
-    var nm = document.createElement('span');
-    nm.className = 'pkg';
-    nm.textContent = pkg;
-    var u = document.createElement('span');
-    u.className = 'uid';
-    u.textContent = uid || '';
+    var txt = document.createElement('div');
+    txt.className = 'li-text';
+    var lab = document.createElement('span');
+    lab.className = 'li-label';
+    lab.textContent = labelOf(pkg);
+    var sub = document.createElement('span');
+    sub.className = 'li-pkg';
+    sub.textContent = uid && uid !== '未安装' ? pkg + ' · ' + uid : pkg;
+    txt.appendChild(lab);
+    txt.appendChild(sub);
     b.appendChild(ic);
-    b.appendChild(nm);
-    b.appendChild(u);
+    b.appendChild(txt);
     b.onclick = function () {
         pickerSel[pkg] = !pickerSel[pkg];
         ic.textContent = pickerSel[pkg] ? 'check_box' : 'check_box_outline_blank';
@@ -190,20 +212,36 @@ function renderPicker(q) {
     box.innerHTML = '';
     var ql = q.trim().toLowerCase();
     var seen = {};
+    var entries = [];
     state.apps.forEach(function (a) {
         seen[a.pkg] = true;
-        if (!ql || a.pkg.toLowerCase().indexOf(ql) >= 0) {
-            box.appendChild(li(a.pkg, a.uid));
-        }
+        entries.push({ pkg: a.pkg, uid: a.uid });
     });
     Object.keys(pickerSel).forEach(function (p) {
-        if (!seen[p] && (!ql || p.toLowerCase().indexOf(ql) >= 0)) {
+        if (!seen[p]) {
             var uid = state.uidMap[p] && state.uidMap[p] !== 'none'
                 ? state.uidMap[p]
                 : '未安装';
-            box.appendChild(li(p, uid));
+            entries.push({ pkg: p, uid: uid });
         }
     });
+    if (ql) {
+        entries = entries.filter(function (e) {
+            return e.pkg.toLowerCase().indexOf(ql) >= 0 ||
+                (state.labels[e.pkg] || '').toLowerCase().indexOf(ql) >= 0;
+        });
+    }
+    var sel = [], unsel = [];
+    entries.forEach(function (e) {
+        (pickerSel[e.pkg] ? sel : unsel).push(e);
+    });
+    var byLabel = function (a, b) {
+        return labelOf(a.pkg).localeCompare(labelOf(b.pkg), 'zh');
+    };
+    sel.sort(byLabel);
+    unsel.sort(byLabel);
+    sel.forEach(function (e) { box.appendChild(li(e.pkg, e.uid)); });
+    unsel.forEach(function (e) { box.appendChild(li(e.pkg, e.uid)); });
     if (!box.children.length) {
         box.innerHTML = '<p class="empty">没有匹配的应用，可在下方手动输入包名</p>';
     }
@@ -221,6 +259,9 @@ async function openPicker(mode) {
     $('pickerList').innerHTML = '<p class="empty">加载中…</p>';
     await ensureApps();
     renderPicker('');
+    ensureLabels().then(function () {
+        renderPicker($('pickerSearch').value);
+    });
 }
 
 function sameSet(a, b) {
