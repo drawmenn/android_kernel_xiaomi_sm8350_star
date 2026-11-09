@@ -29,6 +29,38 @@ static DEFINE_RWLOCK(entries_lock);
 
 static struct kobject *uid_path_filter_kobj;
 
+#define UID_PATH_FILTER_MIN_APP_UID	10000
+#define UID_PATH_FILTER_UID_BITS	65536
+static unsigned long uid_has_rules[BITS_TO_LONGS(UID_PATH_FILTER_UID_BITS)];
+
+static inline int uid_path_filter_uid_to_bit(uid_t uid)
+{
+	if (uid < UID_PATH_FILTER_MIN_APP_UID)
+		return -1;
+	uid %= 100000;
+	uid -= UID_PATH_FILTER_MIN_APP_UID;
+	if (uid >= UID_PATH_FILTER_UID_BITS)
+		return -1;
+	return (int)uid;
+}
+
+static void uid_path_filter_bitmap_set(uid_t uid)
+{
+	int bit = uid_path_filter_uid_to_bit(uid);
+	if (bit >= 0)
+		set_bit(bit, uid_has_rules);
+}
+
+static void uid_path_filter_bitmap_rebuild(void)
+{
+	int i;
+
+	memset(uid_has_rules, 0, sizeof(uid_has_rules));
+	for (i = 0; i < UID_PATH_FILTER_MAX_ENTRIES; i++)
+		if (entries[i].used)
+			uid_path_filter_bitmap_set(entries[i].uid);
+}
+
 /* ---------------- zero-width-aware comparison ---------------- */
 
 /*
@@ -141,6 +173,12 @@ bool uid_path_filter_check_name(const char *name)
 	if (!name)
 		return false;
 
+	{
+		int bit = uid_path_filter_uid_to_bit(caller);
+		if (bit < 0 || !test_bit(bit, uid_has_rules))
+			return false;
+	}
+
 	read_lock(&entries_lock);
 	for (i = 0; i < UID_PATH_FILTER_MAX_ENTRIES; i++) {
 		if (entries[i].used && entries[i].uid == caller &&
@@ -199,7 +237,6 @@ bool uid_path_filter_wrap_dir(struct file *file, struct dir_context *orig,
 	char dirname[UID_PATH_FILTER_MAX_LEN];
 	char *page_buf;
 	char *dpath;
-	bool have_any = false;
 	bool wrapped = false;
 	int i;
 
@@ -208,17 +245,11 @@ bool uid_path_filter_wrap_dir(struct file *file, struct dir_context *orig,
 	if (caller == 0)
 		return false;
 
-	read_lock(&entries_lock);
-	for (i = 0; i < UID_PATH_FILTER_MAX_ENTRIES; i++) {
-		if (entries[i].used && entries[i].uid == caller) {
-			have_any = true;
-			break;
-		}
+	{
+		int bit = uid_path_filter_uid_to_bit(caller);
+		if (bit < 0 || !test_bit(bit, uid_has_rules))
+			return false;
 	}
-	read_unlock(&entries_lock);
-
-	if (!have_any)
-		return false;
 
 	page_buf = (char *)__get_free_page(GFP_KERNEL);
 	if (!page_buf)
@@ -286,6 +317,7 @@ static int uid_path_filter_add(uid_t uid, const char *suffix)
 	entries[free_slot].uid = uid;
 	strlcpy(entries[free_slot].suffix, suffix, UID_PATH_FILTER_MAX_LEN);
 	entries[free_slot].used = true;
+	uid_path_filter_bitmap_set(uid);
 	write_unlock(&entries_lock);
 	return 0;
 }
@@ -300,6 +332,7 @@ static int uid_path_filter_remove(uid_t uid, const char *suffix)
 		    !strcmp(entries[i].suffix, suffix))
 			entries[i].used = false;
 	}
+	uid_path_filter_bitmap_rebuild();
 	write_unlock(&entries_lock);
 	return 0;
 }
@@ -311,6 +344,7 @@ static void uid_path_filter_clear(void)
 	write_lock(&entries_lock);
 	for (i = 0; i < UID_PATH_FILTER_MAX_ENTRIES; i++)
 		entries[i].used = false;
+	memset(uid_has_rules, 0, sizeof(uid_has_rules));
 	write_unlock(&entries_lock);
 }
 

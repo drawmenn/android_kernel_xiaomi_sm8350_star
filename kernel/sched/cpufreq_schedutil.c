@@ -1561,8 +1561,9 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
-	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+	unsigned int td = cpufreq_policy_transition_delay_us(policy);
+	tunables->up_rate_limit_us = min_t(unsigned int, td, 5000);
+	tunables->down_rate_limit_us = td;
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
