@@ -2456,6 +2456,12 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	new_data.min = freq_qos_read_value(&policy->constraints, FREQ_QOS_MIN);
 	new_data.max = freq_qos_read_value(&policy->constraints, FREQ_QOS_MAX);
 
+	/* Cap min_freq at hardware minimum: prevents userspace (powerHAL
+	 * interaction boost) from pinning the frequency floor above
+	 * cpuinfo_min_freq. schedutil still raises frequency dynamically. */
+	if (new_data.min > policy->cpuinfo.min_freq)
+		new_data.min = policy->cpuinfo.min_freq;
+
 	pr_debug("setting new policy for CPU %u: %u - %u kHz\n",
 		 new_data.cpu, new_data.min, new_data.max);
 
