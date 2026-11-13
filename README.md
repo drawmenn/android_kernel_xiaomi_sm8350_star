@@ -102,6 +102,20 @@ git submodule update --init --recursive     # required: KernelSU lives here
 ## 🔄 Upgrading KernelSU / SuSFS
 
 ### 1. KernelSU / ReSukiSU
+
+Fast path — most upstream updates are Manager/ksud-only and need **no kernel work at all**:
+
+```bash
+./sync_ksu.sh --check   # exit 0 = APK-only update, 10 = kernel-side sync needed
+./sync_ksu.sh           # full sync: rebase fork, bump submodule, rebuild, repackage
+```
+
+* **No new upstream commits** → nothing to do.
+* **New commits, none under `kernel/`** → install the newest Manager APK only (releases or CI; the app's built-in update button can lag behind CI and offer a downgrade). ksud updates itself once the APK is installed.
+* **Commits under `kernel/`** → the script rebases the fork branch (`star-5.4-seccomp-cache`), pushes the fork, bumps the submodule and rebuilds. The submodule bump commit stays local until device verification passes (staged release protocol).
+
+Pinning a specific version manually:
+
 ```bash
 cd KernelSU
 git fetch origin
@@ -129,6 +143,14 @@ The script applies `star_dsl_defconfig`, enforces the FCM5 and seccomp gates (it
 Output: `out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
 
 Build toggles: `JOBS=<n>`, `OUT_DIR=<path>`, `CONFIG_ONLY=1` (stop after `.config`), `BBR3=1` (opt into BBRv3 + `fq` instead of CUBIC/pfifo_fast).
+
+### GitHub Actions (cloud build)
+
+`.github/workflows/build-kernel.yml` builds this tree on `ubuntu-24.04` (system clang 18) and uploads the AnyKernel3 zip + config as Actions artifacts — no local build machine needed. It triggers on pushes to `ci/**`, pushes to the default branch, and manual runs (`workflow_dispatch`).
+
+* `ci/**` is meant for refs without unverified kernel-side changes (e.g. a KernelSU submodule bump): push the ref, let the cloud build it, download the artifact, flash.
+* CI never creates GitHub releases. Releases are cut manually, only after device verification.
+* LTO is not deterministic: a CI zip built from identical source is not byte-identical to a local build. Flash and verify the exact zip you intend to release.
 
 ---
 

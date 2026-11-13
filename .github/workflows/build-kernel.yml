@@ -1,0 +1,68 @@
+name: Build kernel (AnyKernel3)
+
+# Cloud build of this tree. Produces the AnyKernel3 zip + kernel config as
+# Actions artifacts; it never creates GitHub releases (staged release
+# protocol: releases are cut manually only after device verification).
+#
+# Triggers:
+#   - push to ci/** branches: intended for refs that carry no unverified
+#     kernel-side changes (e.g. a KernelSU submodule bump) so the cloud
+#     builds them while the local machine is idle.
+#   - push to the default branch: reproducibility build of released source.
+#   - workflow_dispatch: manual run of any branch.
+#
+# Toolchain: ubuntu-24.04 ships clang 18 / lld 18 in apt, which is what the
+# maintained builds use (the compiler banner string is pinned separately in
+# build_star.sh, so any clang >= 12 works).
+
+on:
+  push:
+    branches:
+      - 'ci/**'
+      - '5.4.274-qgki-4dfe63e0666f'
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: star / AnyKernel3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out source (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            zip unzip cpio python3 python-is-python3 \
+            clang lld llvm
+
+      - name: Build
+        run: JOBS=$(nproc) bash build_star.sh
+
+      - name: Package AnyKernel3 zip
+        run: bash anykernel3/build.sh
+
+      - name: Collect outputs
+        run: |
+          OUT="out-star-5.4.274-qgki-g4dfe63e0666f"
+          mkdir -p dist
+          RELEASE="$(cat "$OUT/include/config/kernel.release")"
+          cp "$OUT/$RELEASE.zip" dist/
+          cp "$OUT/.config" "dist/config-$RELEASE"
+          sha256sum dist/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: anykernel3-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error

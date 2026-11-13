@@ -102,6 +102,20 @@ git submodule update --init --recursive     # 必须：KernelSU 在此子模块�
 ## 🔄 升级 KernelSU / SuSFS
 
 ### 1. KernelSU / ReSukiSU
+
+快速路径——上游更新几乎全是 Manager/ksud-only，多数情况下**完全不用动内核**：
+
+```bash
+./sync_ksu.sh --check   # 退出码 0 = 只需装 APK，10 = 需要内核侧同步
+./sync_ksu.sh           # 全流程：rebase fork、更新子模块、重编、打包
+```
+
+* **上游无新提交** → 无事可做。
+* **有新提交但都不在 `kernel/` 下** → 只需安装最新的 Manager APK（注意应用内"检查更新"可能落后于 CI、反而提示降级）。装好 APK 后 ksud 会自行更新。
+* **有 `kernel/` 下的提交** → 脚本会 rebase fork 分支（`star-5.4-seccomp-cache`）、推送 fork、更新子模块并重编。子模块指针提交保留在本地，直到设备验证通过（分阶段发布协议）。
+
+手动固定到指定版本：
+
 ```bash
 cd KernelSU
 git fetch origin
@@ -129,6 +143,14 @@ git add KernelSU && git commit -m "ksu: bump to <tag>"
 产物：`out-star-5.4.274-qgki-g4dfe63e0666f/arch/arm64/boot/Image.gz`
 
 可用开关：`JOBS=<n>`、`OUT_DIR=<路径>`、`CONFIG_ONLY=1`（只生成 `.config` 后停止）、`BBR3=1`（改用 BBRv3 + `fq` 替代 CUBIC/pfifo_fast）。
+
+### GitHub Actions（云端编译）
+
+`.github/workflows/build-kernel.yml` 会在 `ubuntu-24.04`（系统 clang 18）上编译本内核，并把 AnyKernel3 刷机包与 config 作为 Actions 产物上传——本地无需编译环境。触发方式：推送到 `ci/**`、推送到默认分支、手动触发（`workflow_dispatch`）。
+
+* `ci/**` 用于不含未验证内核改动的引用（例如 KernelSU 子模块指针更新）：推送后云端编译，直接下载产物刷入。
+* CI 不会创建 GitHub Release：正式发布仍由人工在设备验证通过后操作。
+* LTO 不具确定性：源码完全相同的 CI 产物与本地产物不是逐字节一致的。要发布哪个 zip，就刷入并验证哪个。
 
 ---
 

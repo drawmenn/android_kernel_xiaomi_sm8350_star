@@ -93,6 +93,12 @@ modules.order
 !.mailmap
 
 #
+# GitHub Actions workflows (this repo's CI)
+#
+!.github/
+!.github/**
+
+#
 # Generated include files
 #
 /include/config/
