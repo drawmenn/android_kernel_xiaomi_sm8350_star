@@ -60,6 +60,7 @@ modules.order
 /vmlinuz
 /System.map
 /Module.markers
+/*.apk
 /modules.builtin.modinfo
 
 #

@@ -106,12 +106,13 @@ git submodule update --init --recursive     # 必须：KernelSU 在此子模块�
 快速路径——上游更新几乎全是 Manager/ksud-only，多数情况下**完全不用动内核**：
 
 ```bash
-./sync_ksu.sh --check   # 退出码 0 = 只需装 APK，10 = 需要内核侧同步
-./sync_ksu.sh           # 全流程：rebase fork、更新子模块、重编、打包
+./sync_ksu.sh --check    # 退出码 0 = 只需装 APK，10 = 需要内核侧同步
+./sync_ksu.sh            # 全流程：rebase fork、更新子模块、重编、打包
+./sync_ksu.sh --manager  # 只拉取最新的 BakaSU 管理器 APK
 ```
 
 * **上游无新提交** → 无事可做。
-* **有新提交但都不在 `kernel/` 下** → 只需安装最新的 Manager APK（注意应用内"检查更新"可能落后于 CI、反而提示降级）。装好 APK 后 ksud 会自行更新。
+* **有新提交但都不在 `kernel/` 下** → 只需换 Manager：不重编、不重刷。脚本会自动从 BakaSU CI 下载最新 Manager APK 到仓库根目录，装 `arm64-v8a` 那个（无需重启）。装好后 ksud 自行更新。应用内"检查更新"可能落后于 CI 反而提示降级，优先用脚本下的这份。
 * **有 `kernel/` 下的提交** → 脚本会 rebase fork 分支（`star-5.4-seccomp-cache`）、推送 fork、更新子模块并重编。子模块指针提交保留在本地，直到设备验证通过（分阶段发布协议）。
 
 手动固定到指定版本：

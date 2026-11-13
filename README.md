@@ -106,12 +106,13 @@ git submodule update --init --recursive     # required: KernelSU lives here
 Fast path — most upstream updates are Manager/ksud-only and need **no kernel work at all**:
 
 ```bash
-./sync_ksu.sh --check   # exit 0 = APK-only update, 10 = kernel-side sync needed
-./sync_ksu.sh           # full sync: rebase fork, bump submodule, rebuild, repackage
+./sync_ksu.sh --check    # exit 0 = APK-only update, 10 = kernel-side sync needed
+./sync_ksu.sh            # full sync: rebase fork, bump submodule, rebuild, repackage
+./sync_ksu.sh --manager  # just fetch the newest Manager APK from the BakaSU CI
 ```
 
 * **No new upstream commits** → nothing to do.
-* **New commits, none under `kernel/`** → install the newest Manager APK only (releases or CI; the app's built-in update button can lag behind CI and offer a downgrade). ksud updates itself once the APK is installed.
+* **New commits, none under `kernel/`** → Manager-only update: no rebuild, no reflash. The script downloads the newest Manager APK from the BakaSU CI into the repo root — install the `arm64-v8a` one (no reboot needed). ksud updates itself once the APK is installed. The app's own update button can lag behind CI and offer a downgrade, so prefer the script's copy.
 * **Commits under `kernel/`** → the script rebases the fork branch (`star-5.4-seccomp-cache`), pushes the fork, bumps the submodule and rebuilds. The submodule bump commit stays local until device verification passes (staged release protocol).
 
 Pinning a specific version manually:
