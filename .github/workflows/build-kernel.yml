@@ -9,7 +9,12 @@ name: Build kernel (AnyKernel3)
 #     kernel-side changes (e.g. a KernelSU submodule bump) so the cloud
 #     builds them while the local machine is idle.
 #   - push to the default branch: reproducibility build of released source.
-#   - workflow_dispatch: manual run of any branch.
+#   - workflow_dispatch: manual run of any branch (zip_suffix input can
+#     name the zip like a release, e.g. "r10").
+#
+# Artifact naming (matches the release convention star-<release>-AK3-rN):
+#   zip:   star-<kernel-release>-AK3-<suffix>.zip  (suffix = input or short sha)
+#   also:  config-<kernel-release>
 #
 # Toolchain: ubuntu-24.04 ships clang 18 / lld 18 in apt, which is what the
 # maintained builds use (the compiler banner string is pinned separately in
@@ -21,6 +26,11 @@ on:
       - 'ci/**'
       - '5.4.274-qgki-4dfe63e0666f'
   workflow_dispatch:
+    inputs:
+      zip_suffix:
+        description: 'Zip name suffix (default: short commit sha), e.g. r10'
+        default: ''
+        required: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -48,21 +58,35 @@ jobs:
       - name: Build
         run: JOBS=$(nproc) bash build_star.sh
 
-      - name: Package AnyKernel3 zip
-        run: bash anykernel3/build.sh
+      - name: Compute build identity
+        id: vars
+        env:
+          SUFFIX_INPUT: ${{ inputs.zip_suffix }}
+        run: echo "zip_suffix=${SUFFIX_INPUT:-${GITHUB_SHA:0:8}}" >> "$GITHUB_OUTPUT"
 
-      - name: Collect outputs
+      - name: Package AnyKernel3 zip
+        env:
+          ZIP_SUFFIX: ${{ steps.vars.outputs.zip_suffix }}
         run: |
           OUT="out-star-5.4.274-qgki-g4dfe63e0666f"
-          mkdir -p dist
           RELEASE="$(cat "$OUT/include/config/kernel.release")"
-          cp "$OUT/$RELEASE.zip" dist/
+          export PACKAGE_NAME="star-$RELEASE-AK3-$ZIP_SUFFIX"
+          bash anykernel3/build.sh
+
+      - name: Collect outputs
+        env:
+          ZIP_SUFFIX: ${{ steps.vars.outputs.zip_suffix }}
+        run: |
+          OUT="out-star-5.4.274-qgki-g4dfe63e0666f"
+          RELEASE="$(cat "$OUT/include/config/kernel.release")"
+          mkdir -p dist
+          cp "$OUT/star-$RELEASE-AK3-$ZIP_SUFFIX.zip" dist/
           cp "$OUT/.config" "dist/config-$RELEASE"
           sha256sum dist/*
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: anykernel3-${{ github.sha }}
+          name: star-AK3-${{ steps.vars.outputs.zip_suffix }}
           path: dist/*
           if-no-files-found: error
