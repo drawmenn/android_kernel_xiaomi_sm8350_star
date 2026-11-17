@@ -95,6 +95,8 @@ jobs:
       - name: Apply upstream main + seccomp_cache (build-only, nothing pushed)
         run: |
           cd KernelSU
+          git config user.name "star-ci"
+          git config user.email "ci@localhost"
           if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
             echo "Submodule clone is shallow; fetching full history from the fork..."
             git fetch --unshallow origin
