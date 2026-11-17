@@ -1,0 +1,37 @@
+name: 'Fetch the newest upstream Manager APK'
+description: >-
+  Downloads the newest Manager-release artifact from the BakaSU CI
+  (the newest successful run that carries one; falls back to the newest
+  GitHub release APK) into ./manager.
+runs:
+  using: composite
+  steps:
+    - name: Fetch the newest upstream Manager APK
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        mkdir -p manager
+        found=""
+        for run_id in $(gh run list --repo Baka-Su/BakaSU --status success --limit 25 \
+                          --json databaseId --jq '.[].databaseId'); do
+          count="$(gh api "repos/Baka-Su/BakaSU/actions/runs/$run_id/artifacts" \
+                     --jq '[.artifacts[] | select(.name=="Manager-release")] | length' 2>/dev/null || echo 0)"
+          if [ "$count" -gt 0 ]; then
+            stage="$(mktemp -d)"
+            if gh run download "$run_id" --repo Baka-Su/BakaSU --name Manager-release --dir "$stage"; then
+              for f in "$stage"/*arm64-v8a*.apk "$stage"/*universal*.apk; do
+                [ -e "$f" ] || continue
+                mv "$f" manager/
+                found=1
+              done
+            fi
+            rm -rf "$stage"
+            [ -n "$found" ] && break
+          fi
+        done
+        if [ -z "$found" ]; then
+          echo "No upstream CI manager build available; falling back to the newest release APK."
+          gh release download --repo ReSukiSU/ReSukiSU --pattern '*arm64-v8a-release.apk' --dir manager --clobber
+        fi
+        ls -la manager/

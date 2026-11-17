@@ -1,0 +1,137 @@
+name: KSU upstream auto-sync
+
+# Automatic kernel-side BakaSU (ReSukiSU) update check.
+#
+#   - no upstream changes              -> run stays green, no artifacts
+#   - Manager/ksud-only changes        -> fetch + upload the newest Manager APK
+#   - kernel/ changes                  -> build "upstream main + seccomp_cache"
+#                                         and upload the kernel zip + config +
+#                                         Manager APK as UNVERIFIED artifacts
+#                                         for device testing
+#
+# It NEVER pushes anything (no fork update, no branch push). After you flash
+# and verify a sync build, run ./sync_ksu.sh locally to formalize the sync
+# (rebase the fork, bump the submodule) and push per the staged release
+# protocol. Upstream cherry-pick conflicts abort this run loudly instead.
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # daily 02:00 UTC = 10:00 Beijing
+  workflow_dispatch:
+
+concurrency:
+  group: ksu-auto-sync
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: upstream check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      new_count: ${{ steps.check.outputs.new_count }}
+      kernel_changed: ${{ steps.check.outputs.kernel_changed }}
+    steps:
+      - name: Check out source (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check upstream for kernel-side changes
+        id: check
+        run: |
+          cd KernelSU
+          git fetch https://github.com/ReSukiSU/ReSukiSU.git main --quiet
+          UP="FETCH_HEAD"
+          BASE="$(git merge-base HEAD "$UP")"
+          NEW_COUNT="$(git rev-list --count "$BASE..$UP")"
+          KERNEL_COUNT="$(git rev-list --count "$BASE..$UP" -- kernel/)"
+          echo "Upstream new commits: $NEW_COUNT; touching kernel/: $KERNEL_COUNT"
+          echo "upstream_tip=$(git rev-parse --short "$UP")" >> "$GITHUB_OUTPUT"
+          echo "new_count=$NEW_COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$KERNEL_COUNT" -gt 0 ]; then
+            echo "kernel_changed=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "kernel_changed=no" >> "$GITHUB_OUTPUT"
+          fi
+
+  manager-only:
+    name: manager-only update (no kernel rebuild)
+    needs: check
+    if: needs.check.outputs.kernel_changed == 'no' && needs.check.outputs.new_count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch the newest upstream Manager APK
+        uses: ./.github/actions/fetch-manager
+
+      - name: Upload Manager APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BakaSU-manager
+          path: manager/*
+          if-no-files-found: error
+
+  sync-build:
+    name: UNVERIFIED sync build (upstream main + seccomp_cache)
+    needs: check
+    if: needs.check.outputs.kernel_changed == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out source (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply upstream main + seccomp_cache (build-only, nothing pushed)
+        run: |
+          cd KernelSU
+          git fetch https://github.com/ReSukiSU/ReSukiSU.git main --quiet
+          UP="FETCH_HEAD"
+          PINNED="$(git rev-parse HEAD)"
+          BASE="$(git merge-base "$PINNED" "$UP")"
+          echo "Pinned fork commit: $(git rev-parse --short "$PINNED"); upstream tip: $(git rev-parse --short "$UP")"
+          git checkout --detach "$UP"
+          git cherry-pick "$BASE..$PINNED"
+          git log --oneline -4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            zip unzip cpio python3 python-is-python3 \
+            clang lld llvm
+
+      - name: Build
+        run: JOBS=$(nproc) bash build_star.sh
+
+      - name: Package AnyKernel3 zip
+        run: bash anykernel3/build.sh
+
+      - name: Collect outputs
+        run: |
+          OUT="out-star-5.4.274-qgki-g4dfe63e0666f"
+          mkdir -p dist
+          RELEASE="$(cat "$OUT/include/config/kernel.release")"
+          cp "$OUT/$RELEASE.zip" dist/
+          cp "$OUT/.config" "dist/config-$RELEASE"
+          sha256sum dist/*
+
+      - name: Upload sync build (UNVERIFIED)
+        uses: actions/upload-artifact@v4
+        with:
+          name: anykernel3-sync-unverified
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Fetch the newest upstream Manager APK
+        uses: ./.github/actions/fetch-manager
+
+      - name: Upload Manager APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BakaSU-manager
+          path: manager/*
+          if-no-files-found: warn
