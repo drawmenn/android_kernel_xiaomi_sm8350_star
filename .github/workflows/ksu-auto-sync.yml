@@ -104,11 +104,12 @@ jobs:
             git fetch --unshallow origin
           fi
           git fetch https://github.com/ReSukiSU/ReSukiSU.git main --quiet
+          UP="$(git rev-parse FETCH_HEAD)"
           # The fork carries no tags; without them Kbuild's `git describe --tags`
           # falls back to its hardcoded "v4.1.0" and the driver reports a stale
           # version name. Fetch the full upstream tag set so %TAG_NAME% is right.
+          # (UP is captured as a string first: a --tags fetch rewrites FETCH_HEAD.)
           git fetch --tags https://github.com/ReSukiSU/ReSukiSU.git "+refs/tags/*:refs/tags/*" --quiet
-          UP="FETCH_HEAD"
           PINNED="$(git rev-parse HEAD)"
           BASE="$(git merge-base "$PINNED" "$UP")"
           echo "Pinned fork commit: $(git rev-parse --short "$PINNED"); upstream tip: $(git rev-parse --short "$UP")"
