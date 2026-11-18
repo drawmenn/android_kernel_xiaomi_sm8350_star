@@ -14,6 +14,10 @@ name: KSU upstream auto-sync
 # (rebase the fork, bump the submodule) and push per the staged release
 # protocol. Upstream cherry-pick conflicts abort this run loudly instead.
 #
+# `build_star.sh` is incremental, so clean only the KSU object/library subtree
+# after changing its submodule HEAD. Otherwise make can keep old objects while
+# the Kbuild version banner is computed from the new Git HEAD.
+#
 # actions/checkout clones the submodule shallow (depth 1); merge-base and
 # cherry-pick need real history, so both jobs unshallow the submodule from
 # the fork remote first. The fork carries no tags, so the sync job fetches
@@ -126,7 +130,35 @@ jobs:
             clang lld llvm
 
       - name: Build
-        run: JOBS=$(nproc) bash build_star.sh
+        run: |
+          # This workflow checks out a fresh runner today, but keep KSU output
+          # explicitly invalidated so future build caching cannot retain objects
+          # whose embedded KSU_VERSION comes from the pinned submodule revision.
+          rm -rf out-star-5.4.274-qgki-g4dfe63e0666f/drivers/kernelsu
+          JOBS=$(nproc) bash build_star.sh
+
+      - name: Verify built-in KSU version is linked into the kernel image
+        run: |
+          OUT="out-star-5.4.274-qgki-g4dfe63e0666f"
+          IMAGE="$OUT/arch/arm64/boot/Image.gz"
+          KSU_DIR="drivers/kernelsu"
+          COUNT="$(git -C KernelSU rev-list --count HEAD)"
+          EXPECTED_CODE="$((30000 + 700 + COUNT))"
+          TAG="$(git -C KernelSU describe --abbrev=0 --tags)"
+          SHA="$(git -C KernelSU rev-parse --short=8 HEAD)"
+          EXPECTED_NAME="${TAG}-${SHA}"
+          CMD="$OUT/$KSU_DIR/core/.init.o.cmd"
+          test -s "$CMD" || { echo "built-in KSU init object command file missing" >&2; exit 1; }
+          grep -F -- "-DKSU_VERSION=$EXPECTED_CODE" "$CMD" >/dev/null || {
+            echo "KSU init object has wrong driver version code; expected $EXPECTED_CODE" >&2; exit 1;
+          }
+          grep -F -- "-DKSU_VERSION_FULL=\\"$EXPECTED_NAME\\"" "$CMD" >/dev/null || {
+            echo "KSU init object has wrong full version; expected $EXPECTED_NAME" >&2; exit 1;
+          }
+          gzip -dc "$IMAGE" | strings | grep -F "$EXPECTED_NAME" >/dev/null || {
+            echo "Expected KSU version $EXPECTED_NAME is absent from final Image.gz" >&2; exit 1;
+          }
+          echo "Verified final Image.gz: KSU code=$EXPECTED_CODE name=$EXPECTED_NAME"
 
       - name: Package AnyKernel3 zip
         run: bash anykernel3/build.sh

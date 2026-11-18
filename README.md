@@ -153,7 +153,7 @@ Build toggles: `JOBS=<n>`, `OUT_DIR=<path>`, `CONFIG_ONLY=1` (stop after `.confi
 * CI never creates GitHub releases. Releases are cut manually, only after device verification.
 * LTO is not deterministic: a CI zip built from identical source is not byte-identical to a local build. Flash and verify the exact zip you intend to release.
 
-**Automatic upstream sync** — `.github/workflows/ksu-auto-sync.yml` runs weekly (Mondays 02:00 UTC) and on demand: it checks upstream ReSukiSU and, when `kernel/` advanced, builds "upstream main + the seccomp_cache commit" (cherry-picked on the runner — nothing is pushed anywhere) and uploads the kernel zip, config and the newest Manager APK as **UNVERIFIED** artifacts for device testing. Manager-only updates just upload the newest Manager APK. After you flash and verify a sync build, run `./sync_ksu.sh` locally to formalize it (rebase the fork, bump the submodule) and push per the staged release protocol.
+**Automatic upstream sync** — `.github/workflows/ksu-auto-sync.yml` runs weekly (Mondays 02:00 UTC) and on demand: it checks upstream ReSukiSU and, when `kernel/` advanced, builds "upstream main + the seccomp_cache commit" (cherry-picked on the runner — nothing is pushed anywhere) and uploads the kernel zip, config and the newest Manager APK from a successful push to Baka-Su/BakaSU `main` (never a PR run) as **UNVERIFIED** artifacts for device testing. Manager-only updates just upload that stable main-branch Manager APK. After you flash and verify a sync build, run `./sync_ksu.sh` locally to formalize it (rebase the fork, bump the submodule) and push per the staged release protocol.
 
 ---
 

@@ -62,9 +62,17 @@ fetch_manager_apk() {
   }
 
   echo "Fetching the newest Manager APK from $manager_repo CI..."
-  local run_id count stage f moved
-  for run_id in $(gh run list --repo "$manager_repo" --status success --limit 25 \
+  local run_id count stage f moved run event branch
+  for run_id in $(gh run list --repo "$manager_repo" --workflow 217367501 \
+                    --event push --branch main --status success --limit 25 \
                     --json databaseId --jq '.[].databaseId'); do
+    run="$(gh api "repos/$manager_repo/actions/runs/$run_id" --jq '{event,branch:.head_branch}' 2>/dev/null || echo '{}')"
+    event="$(jq -r '.event // empty' <<<"$run")"
+    branch="$(jq -r '.branch // empty' <<<"$run")"
+    [[ "$event" == push && "$branch" == main ]] || {
+      echo "Skipping non-main Manager build $run_id ($event/$branch)" >&2
+      continue
+    }
     count="$(gh api "repos/$manager_repo/actions/runs/$run_id/artifacts" \
                --jq '[.artifacts[] | select(.name=="Manager-release")] | length' 2>/dev/null || echo 0)"
     [[ "$count" -gt 0 ]] || continue

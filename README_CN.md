@@ -153,7 +153,7 @@ git add KernelSU && git commit -m "ksu: bump to <tag>"
 * CI 不会创建 GitHub Release：正式发布仍由人工在设备验证通过后操作。
 * LTO 不具确定性：源码完全相同的 CI 产物与本地产物不是逐字节一致的。要发布哪个 zip，就刷入并验证哪个。
 
-**上游自动同步** —— `.github/workflows/ksu-auto-sync.yml` 每周一 02:00 UTC（北京时间周一 10:00）自动检查上游 ReSukiSU：`kernel/` 有更新时，自动在云端构建"upstream main + seccomp_cache 提交"（cherry-pick 在 runner 上完成，不推送任何分支），把内核包、config 和最新 Manager APK 作为**未验证**产物上传供刷机测试；仅管理器更新则只上传最新 Manager APK。刷入验证通过后，本地运行 `./sync_ksu.sh` 走正式流程（rebase fork、更新子模块），按分阶段发布协议推送。随时也可手动触发（`workflow_dispatch`）立即检查。
+**上游自动同步** —— `.github/workflows/ksu-auto-sync.yml` 每周一 02:00 UTC（北京时间周一 10:00）自动检查上游 ReSukiSU：`kernel/` 有更新时，自动在云端构建"upstream main + seccomp_cache 提交"（cherry-pick 在 runner 上完成，不推送任何分支），并将内核包、config 和 Baka-Su/BakaSU `main` 分支成功 push 构建的最新 Manager APK（不取 PR 构建）作为**未验证**产物上传供设备测试；仅管理器更新时也只上传该稳定 main 构建的 APK。刷入验证通过后，本地运行 `./sync_ksu.sh` 走正式流程（rebase fork、更新子模块），按分阶段发布协议推送。随时也可手动触发（`workflow_dispatch`）立即检查。
 
 ---
 

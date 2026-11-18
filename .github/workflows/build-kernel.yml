@@ -3,9 +3,9 @@ name: Build kernel (AnyKernel3)
 # Cloud build of this tree. Produces the AnyKernel3 zip + kernel config as
 # Actions artifacts; it never creates GitHub releases (staged release
 # protocol: releases are cut manually only after device verification).
-# Every run also fetches the newest upstream Manager APK (BakaSU CI) and
-# uploads it next to the kernel artifacts, so the run page is a one-stop
-# download for both.
+# Every run also attaches the newest successful Manager-release artifact from a
+# push to Baka-Su/BakaSU main (never a pull-request build), so the run page is
+# a one-stop download for both.
 #
 # Triggers:
 #   - push to ci/** branches: intended for refs that carry no unverified
@@ -76,7 +76,8 @@ jobs:
         run: |
           mkdir -p manager
           found=""
-          for run_id in $(gh run list --repo Baka-Su/BakaSU --status success --limit 25 \
+          for run_id in $(gh run list --repo Baka-Su/BakaSU --workflow 217367501 \
+                            --event push --branch main --status success --limit 25 \
                             --json databaseId --jq '.[].databaseId'); do
             count="$(gh api "repos/Baka-Su/BakaSU/actions/runs/$run_id/artifacts" \
                        --jq '[.artifacts[] | select(.name=="Manager-release")] | length' 2>/dev/null || echo 0)"

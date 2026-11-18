@@ -1,7 +1,7 @@
 name: 'Fetch the newest upstream Manager APK'
 description: >-
-  Downloads the newest Manager-release artifact from the BakaSU CI
-  (the newest successful run that carries one; falls back to the newest
+  Downloads the newest successful Manager-release artifact from a push to
+  Baka-Su/BakaSU's main branch (never PR builds; falls back to the newest
   GitHub release APK) into ./manager.
 runs:
   using: composite
@@ -13,7 +13,8 @@ runs:
       run: |
         mkdir -p manager
         found=""
-        for run_id in $(gh run list --repo Baka-Su/BakaSU --status success --limit 25 \
+        for run_id in $(gh run list --repo Baka-Su/BakaSU --workflow 217367501 \
+                          --event push --branch main --status success --limit 25 \
                           --json databaseId --jq '.[].databaseId'); do
           count="$(gh api "repos/Baka-Su/BakaSU/actions/runs/$run_id/artifacts" \
                      --jq '[.artifacts[] | select(.name=="Manager-release")] | length' 2>/dev/null || echo 0)"
