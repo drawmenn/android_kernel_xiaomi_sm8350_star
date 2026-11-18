@@ -16,7 +16,9 @@ name: KSU upstream auto-sync
 #
 # actions/checkout clones the submodule shallow (depth 1); merge-base and
 # cherry-pick need real history, so both jobs unshallow the submodule from
-# the fork remote first.
+# the fork remote first. The fork carries no tags, so the sync job fetches
+# the full upstream tag set too — otherwise Kbuild's `git describe --tags`
+# falls back to "v4.1.0" and the built driver reports a stale version name.
 
 on:
   schedule:
@@ -102,6 +104,10 @@ jobs:
             git fetch --unshallow origin
           fi
           git fetch https://github.com/ReSukiSU/ReSukiSU.git main --quiet
+          # The fork carries no tags; without them Kbuild's `git describe --tags`
+          # falls back to its hardcoded "v4.1.0" and the driver reports a stale
+          # version name. Fetch the full upstream tag set so %TAG_NAME% is right.
+          git fetch --tags https://github.com/ReSukiSU/ReSukiSU.git "+refs/tags/*:refs/tags/*" --quiet
           UP="FETCH_HEAD"
           PINNED="$(git rev-parse HEAD)"
           BASE="$(git merge-base "$PINNED" "$UP")"
