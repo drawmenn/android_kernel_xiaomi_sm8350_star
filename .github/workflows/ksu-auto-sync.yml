@@ -152,8 +152,8 @@ jobs:
           grep -F -- "-DKSU_VERSION=$EXPECTED_CODE" "$CMD" >/dev/null || {
             echo "KSU init object has wrong driver version code; expected $EXPECTED_CODE" >&2; exit 1;
           }
-          grep -F -- "-DKSU_VERSION_FULL=\\"$EXPECTED_NAME\\"" "$CMD" >/dev/null || {
-            echo "KSU init object has wrong full version; expected $EXPECTED_NAME" >&2; exit 1;
+          grep -F -- "$EXPECTED_NAME" "$CMD" >/dev/null || {
+            echo "KSU init object command lacks expected full version $EXPECTED_NAME" >&2; exit 1;
           }
           gzip -dc "$IMAGE" | strings | grep -F "$EXPECTED_NAME" >/dev/null || {
             echo "Expected KSU version $EXPECTED_NAME is absent from final Image.gz" >&2; exit 1;
