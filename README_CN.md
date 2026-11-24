@@ -2,7 +2,7 @@
 
 [**English Documentation**](README.md) | **中文说明文档**
 
-小米 11 Pro / Ultra（`star` / `mars`，骁龙 888 / SM8350）的 QGKI 5.4.274 自编译内核，基于高通开源基线，集成 **ReSukiSU / BakaSU**、**SuSFS v2.3.0**、**Linux 5.10 Seccomp 位图快路径回移**，以及一组面向个人设备使用的**环境一致性兼容**调整。
+小米 11 Pro / Ultra（`star` / `mars`，骁龙 888 / SM8350）的 QGKI 5.4.274 自编译内核，基于高通开源基线，集成 **ReSukiSU / BakaSU**、**SuSFS v2.4.0**、**Linux 5.10 Seccomp 位图快路径回移**，以及一组面向个人设备使用的**环境一致性兼容**调整。
 
 ---
 
@@ -39,7 +39,7 @@
 ### 1. Root 与命名空间隔离层
 
 * **ReSukiSU / BakaSU (v4.2.0-rc3)**：持续维护的 KernelSU 分支，采用 **inline hook** 模型而非可选 kprobes，不产生额外的指令陷入开销，也不留下 tracepoint 足迹。
-* **SuSFS v2.3.0**：作用域化的文件系统命名空间层：
+* **SuSFS v2.4.0**：作用域化的文件系统命名空间层：
   * `sus_path`、`sus_mount`、`sus_kstat`、`open_redirect`、`sus_map`：使模块路径不出现在常规路径查询中；
   * `/proc/<pid>/fdinfo` 与 `inotify_fdinfo` 过滤：内部路径不会经由文件描述符自省暴露；
   * `vfs_statfs` 归一化：挂载点上报预期的文件系统类型。
@@ -124,13 +124,26 @@ git checkout <tag-or-commit>     # 固定具体 tag，不要跟随移动的分�
 cd ..
 git add KernelSU && git commit -m "ksu: bump to <tag>"
 ```
-跨大版本升级时，先核对 `KernelSU/kernel/core_hook.c` 里的 inline hook 原型（以及 `susfs` 胶水层）是否与树内 SuSFS 版本匹配，再开始编译。
+编译前运行 `python3 scripts/check_susfs_compat.py`；本地构建和自动同步工作流也会执行该预检查。跨版本升级还需核对 inline hook 与 5.4 的 VFS、SELinux 接口，不能只补命令宏。
 
 ### 2. SuSFS
-1. 新版 `susfs.h` 覆盖到 `include/linux/susfs.h`，`susfs.c` 覆盖到 `fs/susfs.c`。
-2. 比对 VFS 挂接点：`fs/stat.c`、`fs/statfs.c`、`fs/open.c`、`fs/proc/fd.c`、`fs/notify/fdinfo.c`、`fs/proc/version.c`。
-3. 同步 KernelSU 子模块内的 `ksu_susfs` 胶水代码。
-4. 重新编译，并搭配版本号一致的用户态 SuSFS 模块。
+本树已移植 **SuSFS v2.4.0**，来源为 `simonpunk/susfs4ksu` 的
+`gki-android12-5.10` 分支，固定提交
+`784ac9e6fd49bb02499b5b60c57ccc9d0c680204`。移植包含两类包名 UID
+过滤接口、RCU 更新及配套 SELinux 集成，并适配 5.4 的策略锁、fsnotify
+和 VFS 接口。现有优先级查询作用域限制及 per-UID 路径过滤仍保留；
+原有较广的跨应用查询限制不会因为未选中新 SuSFS 位图而取消。
+
+升级时必须一起核对实现、两份头文件、VFS 与 SELinux 挂钩：
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_susfs_*.py'
+./build_star.sh
+```
+
+测试覆盖 ARM64 UID 过滤 ABI、输入校验与原有 UID 作用域。
+**编译成功不等于实机验证通过**；需搭配兼容的 BakaSU Manager，验证
+启动、Root、SELinux 与文件系统行为后再正式发布或用于日常刷机。
 
 ---
 

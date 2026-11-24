@@ -2,7 +2,7 @@
 
 [**中文说明文档 (Chinese README)**](README_CN.md) | **English Documentation**
 
-Custom Qualcomm Generic Kernel Image (QGKI 5.4.274) for Xiaomi Mi 11 Pro / Ultra (`star` / `mars`, SM8350), built from the Qualcomm open-source baseline and integrated with **ReSukiSU / BakaSU**, **SuSFS v2.3.0**, a **Linux 5.10 Seccomp bitmap fastpath backport**, and a set of **environment-integrity compatibility** adjustments for personal-device use.
+Custom Qualcomm Generic Kernel Image (QGKI 5.4.274) for Xiaomi Mi 11 Pro / Ultra (`star` / `mars`, SM8350), built from the Qualcomm open-source baseline and integrated with **ReSukiSU / BakaSU**, **SuSFS v2.4.0**, a **Linux 5.10 Seccomp bitmap fastpath backport**, and a set of **environment-integrity compatibility** adjustments for personal-device use.
 
 ---
 
@@ -39,7 +39,7 @@ The kernel ships as an **AnyKernel3 boot-image-only** package: it replaces `Imag
 ### 1. Root & isolation layer
 
 * **ReSukiSU / BakaSU (v4.2.0-rc3)** — a maintained KernelSU fork using the **inline-hook** model instead of optional kprobes, so there is no extra instruction-trap overhead and no tracepoint footprint to account for.
-* **SuSFS v2.3.0** — scoped filesystem namespace layer:
+* **SuSFS v2.4.0** — scoped filesystem namespace layer:
   * `sus_path`, `sus_mount`, `sus_kstat`, `open_redirect`, `sus_map` keep module paths out of ordinary path queries;
   * `/proc/<pid>/fdinfo` and `inotify_fdinfo` filtering, so internal paths do not surface through descriptor introspection;
   * `vfs_statfs` normalisation, so mounts report the expected filesystem type.
@@ -124,13 +124,32 @@ git checkout <tag-or-commit>     # pin an explicit tag; do not track a moving br
 cd ..
 git add KernelSU && git commit -m "ksu: bump to <tag>"
 ```
-Cross-major upgrades: re-check the inline-hook prototypes in `KernelSU/kernel/core_hook.c` (and the `susfs` glue) against the SuSFS version in the tree before building.
+Before building, run `python3 scripts/check_susfs_compat.py`. The build and
+auto-sync workflows run this check too. Cross-version upgrades must also
+re-check the inline hooks and the 5.4 VFS/SELinux interfaces.
 
 ### 2. SuSFS
-1. Drop the new `susfs.h` into `include/linux/susfs.h` and `susfs.c` into `fs/susfs.c`.
-2. Diff the VFS hook sites: `fs/stat.c`, `fs/statfs.c`, `fs/open.c`, `fs/proc/fd.c`, `fs/notify/fdinfo.c`, `fs/proc/version.c`.
-3. Update the `ksu_susfs` glue inside the KernelSU submodule.
-4. Rebuild and pair with a matching SuSFS userspace module version.
+This tree ports **SuSFS v2.4.0**, based on `simonpunk/susfs4ksu`
+`gki-android12-5.10` commit `784ac9e6fd49bb02499b5b60c57ccc9d0c680204`.
+It includes both package-based UID filters, RCU-backed updates and the
+matching SELinux integration, adapted to the 5.4 policy locks and fsnotify API.
+The existing broad priority-query scoping and per-UID path filtering remain
+enabled. Broad scoping still hides unprivileged cross-app priority queries
+even when an app is not selected in the new SuSFS bitmap.
+
+Do not replace just two headers or define missing commands without their
+implementations. Update `susfs.c`, both headers, the VFS hooks, and the
+SELinux integration together. Then run:
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_susfs_*.py'
+./build_star.sh
+```
+
+The host tests check the two UID-filter ABIs on ARM64 and the preserved UID
+scope. A successful build is **not** device verification: pair it with a
+compatible BakaSU Manager and test boot/root/SELinux/filesystem behaviour
+before releasing or flashing it for regular use.
 
 ---
 
@@ -169,6 +188,6 @@ Build toggles: `JOBS=<n>`, `OUT_DIR=<path>`, `CONFIG_ONLY=1` (stop after `.confi
 
 ## 🇨🇳 中文说明摘要
 
-本仓库是小米 11 Pro / Ultra（`star` / `mars`，骁龙 888 / SM8350）的 QGKI 5.4.274 自编译内核，集成 ReSukiSU / BakaSU 与 SuSFS v2.3.0，并包含 Seccomp 位图快路径回移、ThinLTO 与 FCM5 合规配置。适用于 Android 11–14（MIUI 12.5 / 13 / 14、HyperOS 1.0）。
+本仓库是小米 11 Pro / Ultra（`star` / `mars`，骁龙 888 / SM8350）的 QGKI 5.4.274 自编译内核，集成 ReSukiSU / BakaSU 与 SuSFS v2.4.0，并包含 Seccomp 位图快路径回移、ThinLTO 与 FCM5 合规配置。适用于 Android 11–14（MIUI 12.5 / 13 / 14、HyperOS 1.0）。
 
 **仅限个人设备的技术研究与学习使用**，不得用于规避反作弊、风控、DRM 或任何访问控制机制。完整中文文档见 👉 [**README_CN.md**](README_CN.md)

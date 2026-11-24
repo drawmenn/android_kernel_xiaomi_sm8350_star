@@ -357,10 +357,9 @@ extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode,
 					       unsigned long *out_ino);
 #endif
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-extern int susfs_open_redirect_spoof_show_map_vma(struct inode *inode,
-						  unsigned long *out_ino,
-						  dev_t *out_dev,
-						  char *spoofed_name);
+extern struct srcu_struct susfs_srcu_open_redirect;
+extern int susfs_open_redirect_spoof_show_map_vma_srcu(struct inode *inode,
+                    unsigned long *out_ino, dev_t *out_dev, char **name);
 #endif
 
 static void
@@ -374,20 +373,28 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 	unsigned long start, end;
 	dev_t dev = 0;
 	const char *name = NULL;
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-	char *spoofed_redirected_name = NULL;
-#endif
+
 
 	if (file) {
 		struct inode *inode = file_inode(vma->vm_file);
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 		if (SUSFS_IS_INODE_OPEN_REDIRECT(inode)) {
-			if (!susfs_open_redirect_spoof_show_map_vma(inode, &ino,
-								    &dev,
-								    spoofed_redirected_name)) {
+			char *name = NULL;
+			int idx = srcu_read_lock(&susfs_srcu_open_redirect);
+			int ret = susfs_open_redirect_spoof_show_map_vma_srcu(inode,
+					&ino, &dev, &name);
+			if (!ret) {
 				pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
-				goto orig_flow;
+				show_vma_header_prefix(m, vma->vm_start, vma->vm_end,
+					flags, pgoff, dev, ino);
+				seq_pad(m, ' ');
+				if (name)
+					seq_puts(m, name);
+				seq_putc(m, '\n');
+				srcu_read_unlock(&susfs_srcu_open_redirect, idx);
+				return;
 			}
+			srcu_read_unlock(&susfs_srcu_open_redirect, idx);
 		}
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
@@ -416,9 +423,7 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 #endif
 	}
 
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-orig_flow:
-#endif
+
 	start = vma->vm_start;
 	end = vma->vm_end;
 	show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);
@@ -427,15 +432,7 @@ orig_flow:
 	 * Print the dentry name for named mappings, and a
 	 * special [heap] marker for the heap:
 	 */
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-	if (spoofed_redirected_name) {
-		seq_pad(m, ' ');
-		seq_puts(m, spoofed_redirected_name);
-		seq_putc(m, '\n');
-		kfree(spoofed_redirected_name);
-		return;
-	}
-#endif
+
 
 	if (file) {
 		seq_pad(m, ' ');

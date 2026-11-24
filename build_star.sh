@@ -107,6 +107,7 @@ scripts/config --file "$OUT_DIR/.config" \
   --enable KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
   --enable KSU_SUSFS_OPEN_REDIRECT \
   --enable KSU_SUSFS_SUS_MAP \
+  --enable KSU_SUSFS_PRIORITY_UID_FILTER \
   --enable UID_PATH_FILTER \
   --enable KALLSYMS \
   --enable KALLSYMS_ALL \
@@ -184,6 +185,15 @@ grep -qx "CONFIG_UID_PATH_FILTER=y" "$OUT_DIR/.config" || {
   echo "UID_PATH_FILTER not enabled in .config" >&2
   exit 2
 }
+
+# Fail before a costly kernel build when upstream changes the SuSFS ABI.
+python3 scripts/check_susfs_compat.py
+for required in KSU_SUSFS_SUS_PATH KSU_SUSFS_PRIORITY_UID_FILTER; do
+  grep -qx "CONFIG_${required}=y" "$OUT_DIR/.config" || {
+    echo "SuSFS v2.4 requirement not applied: CONFIG_${required}" >&2
+    exit 2
+  }
+done
 
 if [[ "${CONFIG_ONLY:-0}" == "1" ]]; then
   echo "Configured only: $OUT_DIR/.config"

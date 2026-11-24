@@ -121,6 +121,9 @@ jobs:
           git cherry-pick "$BASE..$PINNED"
           git log --oneline -4
 
+      - name: Check KernelSU and SuSFS interfaces
+        run: python3 scripts/check_susfs_compat.py
+
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -131,6 +134,7 @@ jobs:
 
       - name: Build
         run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_susfs_*.py'
           # This workflow checks out a fresh runner today, but keep KSU output
           # explicitly invalidated so future build caching cannot retain objects
           # whose embedded KSU_VERSION comes from the pinned submodule revision.

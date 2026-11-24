@@ -40,6 +40,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Check KernelSU and SuSFS interfaces
+        run: |
+          python3 scripts/check_susfs_compat.py
+          python3 -m unittest discover -s scripts/tests -p 'test_susfs_compat.py'
+
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -49,7 +54,9 @@ jobs:
             clang lld llvm
 
       - name: Build
-        run: JOBS=$(nproc) bash build_star.sh
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_susfs_*.py'
+          JOBS=$(nproc) bash build_star.sh
 
       - name: Package AnyKernel3 zip
         run: bash anykernel3/build.sh

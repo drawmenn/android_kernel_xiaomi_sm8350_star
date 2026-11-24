@@ -29,7 +29,19 @@
 struct mount;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat);
+extern bool susfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);
+extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode,
+						struct kstat *stat, u32 result_mask);
+/* Keep the 5.4 kstat ABI: do not expose private SuSFS bits to userspace. */
+static void susfs_spoof_kstat(struct inode *inode, struct kstat *stat)
+{
+	bool is_fuse = false;
+
+	if (susfs_is_current_app_uid() &&
+	    susfs_is_inode_sus_kstat(inode, &is_fuse))
+		susfs_sus_kstat_spoof_generic_fillattr(inode, stat,
+			is_fuse ? STATX_SUS_KSTAT_FUSE : STATX_SUS_KSTAT);
+}
 static unsigned long susfs_data_local_tmp_ino = 0;
 static inline void susfs_sanitize_tmp_kstat(const struct path *path, struct inode *inode, struct kstat *stat)
 {
@@ -116,7 +128,7 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->blksize = i_blocksize(inode);
 	stat->blocks = inode->i_blocks;
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	susfs_sus_kstat_spoof_generic_fillattr(inode, stat);
+	susfs_spoof_kstat(inode, stat);
 #endif
 }
 EXPORT_SYMBOL(generic_fillattr);
@@ -156,7 +168,7 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 		int err = inode->i_op->getattr(path, stat, request_mask,
 					    query_flags);
 		if (!err) {
-			susfs_sus_kstat_spoof_generic_fillattr(inode, stat);
+			susfs_spoof_kstat(inode, stat);
 			susfs_sanitize_tmp_kstat(path, inode, stat);
 		}
 		return err;

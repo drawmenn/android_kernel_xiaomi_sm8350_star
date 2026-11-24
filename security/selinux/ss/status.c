@@ -76,6 +76,10 @@ struct page *selinux_kernel_status_page(struct selinux_state *state)
  *
  * It updates status of the current enforcing/permissive mode.
  */
+#ifdef CONFIG_KSU_SUSFS
+extern bool susfs_is_current_ksu_domain(void);
+#endif
+
 void selinux_status_update_setenforce(struct selinux_state *state,
 				      int enforcing)
 {
@@ -88,7 +92,10 @@ void selinux_status_update_setenforce(struct selinux_state *state,
 		status->sequence++;
 		smp_wmb();
 
-		status->enforcing = enforcing;
+#ifdef CONFIG_KSU_SUSFS
+		if (!susfs_is_current_ksu_domain())
+#endif
+			status->enforcing = enforcing;
 
 		smp_wmb();
 		status->sequence++;
@@ -114,8 +121,14 @@ void selinux_status_update_policyload(struct selinux_state *state,
 		status->sequence++;
 		smp_wmb();
 
-		status->policyload = seqno;
-		status->deny_unknown = !security_get_allow_unknown(state);
+#ifdef CONFIG_KSU_SUSFS
+		if (!susfs_is_current_ksu_domain()) {
+#endif
+			status->policyload = seqno;
+			status->deny_unknown = !security_get_allow_unknown(state);
+#ifdef CONFIG_KSU_SUSFS
+		}
+#endif
 
 		smp_wmb();
 		status->sequence++;

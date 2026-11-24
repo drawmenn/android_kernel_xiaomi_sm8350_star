@@ -103,6 +103,17 @@ static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
 	return retval;
 }
 
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+int statfs_by_dentry_wrapper(struct dentry *dentry, struct kstatfs *buf)
+{
+	return statfs_by_dentry(dentry, buf);
+}
+int calculate_f_flags_wrapper(struct vfsmount *mnt)
+{
+	return calculate_f_flags(mnt);
+}
+#endif
+
 int vfs_get_fsid(struct dentry *dentry, __kernel_fsid_t *fsid)
 {
 	struct kstatfs st;
@@ -121,45 +132,23 @@ EXPORT_SYMBOL(vfs_get_fsid);
 extern struct vfsmount *susfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt);
 #endif //#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-extern int susfs_open_redirect_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf);
-#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+
 
 int vfs_statfs(const struct path *path, struct kstatfs *buf)
 {
 	int error;
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	struct vfsmount *no_sus_vfsmnt = NULL;
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-	struct inode *inode = path->dentry->d_inode;
-
+#endif
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	if (susfs_is_current_app_uid()) {
-		struct inode *inode_kstat = d_backing_inode(path->dentry);
+		struct inode *inode = d_backing_inode(path->dentry);
 		bool is_fuse = false;
-		if (susfs_is_inode_sus_kstat(inode_kstat, &is_fuse)) {
-			return susfs_statfs_by_dentry(path->dentry, path->mnt, buf, &is_fuse);
-		}
+		if (susfs_is_inode_sus_kstat(inode, &is_fuse))
+			return susfs_statfs_by_dentry(path->dentry, path->mnt,
+						     buf, &is_fuse);
 	}
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-
-	if (SUSFS_IS_INODE_OPEN_REDIRECT(inode)) {
-		if (susfs_open_redirect_spoof_vfs_statfs(inode, buf))
-			goto orig_flow;
-		return 0;
-	}
-#else
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	if (susfs_is_current_app_uid()) {
-		struct inode *inode_kstat = d_backing_inode(path->dentry);
-		bool is_fuse = false;
-		if (susfs_is_inode_sus_kstat(inode_kstat, &is_fuse)) {
-			return susfs_statfs_by_dentry(path->dentry, path->mnt, buf, &is_fuse);
-		}
-	}
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+#endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (likely(susfs_is_current_proc_umounted() && path->mnt)) {

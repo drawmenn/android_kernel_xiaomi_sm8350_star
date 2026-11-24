@@ -27,6 +27,11 @@
 /* Offset of the per-secondary-user UID range (AID_USER_OFFSET). */
 #define UID_PRIO_FILTER_AID_USER	100000
 
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+/* All four syscall callers hold rcu_read_lock() at this point. */
+extern bool susfs_is_priority_uid_filtered(uid_t uid);
+#endif
+
 /**
  * uid_prio_filter_hide - scope an unprivileged cross-UID lookup to self
  * @uid: target UID, already mapped into the caller's user namespace
@@ -54,6 +59,15 @@ static __always_inline bool uid_prio_filter_hide(kuid_t uid)
 	if (target >= UID_PRIO_FILTER_AID_USER)
 		target %= UID_PRIO_FILTER_AID_USER;
 
+	/* Preserve system and own-app access before consulting the new bitmap. */
+	if (caller == target || caller < UID_PRIO_FILTER_MIN_APP_UID ||
+	    target < UID_PRIO_FILTER_MIN_APP_UID)
+		return false;
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+	if (susfs_is_priority_uid_filtered(__kuid_val(uid)))
+		return true;
+#endif
+	/* Existing broader cross-UID scoping is intentionally retained. */
 	return caller != target;
 }
 
