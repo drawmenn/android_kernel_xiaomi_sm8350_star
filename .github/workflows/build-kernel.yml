@@ -1,8 +1,9 @@
 name: Build kernel (AnyKernel3)
 
 # Cloud build of this tree. Produces the AnyKernel3 zip + kernel config as
-# Actions artifacts; it never creates GitHub releases (staged release
-# protocol: releases are cut manually only after device verification).
+# Actions artifacts and replaces the dedicated latest-build prerelease.
+# Fixed device-verified releases are still published manually and never changed
+# by this workflow.
 # Every run also attaches the newest successful Manager-release artifact from a
 # push to Baka-Su/BakaSU main (never a pull-request build), so the run page is
 # a one-stop download for both.
@@ -25,6 +26,10 @@ on:
       - '5.4.274-qgki-4dfe63e0666f'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
@@ -39,6 +44,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Resolve pinned KernelSU history and upstream version tags
+        run: |
+          cd KernelSU
+          if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
+            git fetch --unshallow origin
+          fi
+          git fetch --tags https://github.com/ReSukiSU/ReSukiSU.git \
+            "+refs/tags/*:refs/tags/*" --quiet
 
       - name: Check KernelSU and SuSFS interfaces
         run: |
@@ -55,20 +69,18 @@ jobs:
 
       - name: Build
         run: |
-          python3 -m unittest discover -s scripts/tests -p 'test_susfs_*.py'
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
           JOBS=$(nproc) bash build_star.sh
 
       - name: Package AnyKernel3 zip
         run: bash anykernel3/build.sh
 
-      - name: Collect outputs
-        run: |
-          OUT="out-star-5.4.274-qgki-g4dfe63e0666f"
-          mkdir -p dist
-          RELEASE="$(cat "$OUT/include/config/kernel.release")"
-          cp "$OUT/$RELEASE.zip" dist/
-          cp "$OUT/.config" "dist/config-$RELEASE"
-          sha256sum dist/*
+      - name: Fetch the newest upstream Manager APK
+        continue-on-error: true
+        uses: ./.github/actions/fetch-manager
+
+      - name: Verify and collect fixed-name build bundle
+        run: python3 scripts/collect_build_release.py --kind pinned
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -77,39 +89,37 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-      - name: Fetch the newest upstream Manager APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p manager
-          found=""
-          for run_id in $(gh run list --repo Baka-Su/BakaSU --workflow 217367501 \
-                            --event push --branch main --status success --limit 25 \
-                            --json databaseId --jq '.[].databaseId'); do
-            count="$(gh api "repos/Baka-Su/BakaSU/actions/runs/$run_id/artifacts" \
-                       --jq '[.artifacts[] | select(.name=="Manager-release")] | length' 2>/dev/null || echo 0)"
-            if [ "$count" -gt 0 ]; then
-              stage="$(mktemp -d)"
-              if gh run download "$run_id" --repo Baka-Su/BakaSU --name Manager-release --dir "$stage"; then
-                for f in "$stage"/*arm64-v8a*.apk "$stage"/*universal*.apk; do
-                  [ -e "$f" ] || continue
-                  mv "$f" manager/
-                  found=1
-                done
-              fi
-              rm -rf "$stage"
-              [ -n "$found" ] && break
-            fi
-          done
-          if [ -z "$found" ]; then
-            echo "No upstream CI manager build available; falling back to the newest release APK."
-            gh release download --repo ReSukiSU/ReSukiSU --pattern '*arm64-v8a-release.apk' --dir manager --clobber
-          fi
-          ls -la manager/
-
       - name: Upload Manager APK
+        if: hashFiles('manager/*.apk') != ''
         uses: actions/upload-artifact@v4
         with:
           name: BakaSU-manager
           path: manager/*
           if-no-files-found: warn
+
+  publish:
+    name: Replace latest-build prerelease
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: latest-build-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: anykernel3-${{ github.sha }}
+          path: release-bundle
+      - name: Test release publisher
+        run: python3 -m unittest discover -s scripts/tests -p 'test_release_pipeline.py'
+      - name: Stage, verify and replace rolling build assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_rolling_release.py --bundle release-bundle

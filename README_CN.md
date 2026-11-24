@@ -163,10 +163,28 @@ python3 -m unittest discover -s scripts/tests -p 'test_susfs_*.py'
 `.github/workflows/build-kernel.yml` 会在 `ubuntu-24.04`（系统 clang 18）上编译本内核，并把 AnyKernel3 刷机包与 config 作为 Actions 产物上传——本地无需编译环境。触发方式：推送到 `ci/**`、推送到默认分支、手动触发（`workflow_dispatch`）。
 
 * `ci/**` 用于不含未验证内核改动的引用（例如 KernelSU 子模块指针更新）：推送后云端编译，直接下载产物刷入。
-* CI 不会创建 GitHub Release：正式发布仍由人工在设备验证通过后操作。
+* 固定正式 Release 仍由人工在设备验证通过后发布。普通内核构建和
+  KSU 同步构建成功后，还会自动替换独立的 `latest-build` **预发布页**；
+  不会覆盖固定正式版本，也不会抢占稳定版 Latest 标记。
 * LTO 不具确定性：源码完全相同的 CI 产物与本地产物不是逐字节一致的。要发布哪个 zip，就刷入并验证哪个。
 
 **上游自动同步** —— `.github/workflows/ksu-auto-sync.yml` 每周一 02:00 UTC（北京时间周一 10:00）自动检查上游 ReSukiSU：`kernel/` 有更新时，自动在云端构建"upstream main + seccomp_cache 提交"（cherry-pick 在 runner 上完成，不推送任何分支），并将内核包、config 和 Baka-Su/BakaSU `main` 分支成功 push 构建的最新 Manager APK（不取 PR 构建）作为**未验证**产物上传供设备测试；仅管理器更新时也只上传该稳定 main 构建的 APK。刷入验证通过后，本地运行 `./sync_ksu.sh` 走正式流程（rebase fork、更新子模块），按分阶段发布协议推送。随时也可手动触发（`workflow_dispatch`）立即检查。
+
+手动同步入口提供 `force_build` 开关，即使上游没有新提交，也能强制
+验证完整同步构建链路。两个工作流均不更新 fork/主源码分支，仅移动
+滚动构建标签。
+
+### 滚动构建产物
+
+`latest-build` 预发布页使用固定文件名：`kernel.zip`、`Image.gz`、
+`kernel.config`、`System.map`、`Module.symvers`，以及可选的 DTB/模块
+归档和 `Manager-arm64-v8a.apk`；另附 `build-info.json` 与 `SHA256SUMS`。
+每次成功内核构建触发替换；仅 Manager 更新不替换内核包。来源清单
+记录实际源码、KernelSU tree、工作流/run/attempt 和校验值。
+
+两个工作流共用串行发布锁。新文件先以暂存名上传并校验，再替换旧
+产物；提升失败会回滚，较旧的排队任务不能反向覆盖较新构建。
+滚动产物**不会**自动升级为经过实机验证的固定正式版本。
 
 ---
 

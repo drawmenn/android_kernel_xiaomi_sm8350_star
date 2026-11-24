@@ -169,10 +169,31 @@ Build toggles: `JOBS=<n>`, `OUT_DIR=<path>`, `CONFIG_ONLY=1` (stop after `.confi
 `.github/workflows/build-kernel.yml` builds this tree on `ubuntu-24.04` (system clang 18) and uploads the AnyKernel3 zip + config as Actions artifacts — no local build machine needed. It triggers on pushes to `ci/**`, pushes to the default branch, and manual runs (`workflow_dispatch`).
 
 * `ci/**` is meant for refs without unverified kernel-side changes (e.g. a KernelSU submodule bump): push the ref, let the cloud build it, download the artifact, flash.
-* CI never creates GitHub releases. Releases are cut manually, only after device verification.
+* Fixed releases are cut manually, only after device verification. Successful
+  normal and upstream-sync builds also replace the separate `latest-build`
+  **prerelease**. It never replaces a fixed release or becomes the stable Latest.
 * LTO is not deterministic: a CI zip built from identical source is not byte-identical to a local build. Flash and verify the exact zip you intend to release.
 
 **Automatic upstream sync** — `.github/workflows/ksu-auto-sync.yml` runs weekly (Mondays 02:00 UTC) and on demand: it checks upstream ReSukiSU and, when `kernel/` advanced, builds "upstream main + the seccomp_cache commit" (cherry-picked on the runner — nothing is pushed anywhere) and uploads the kernel zip, config and the newest Manager APK from a successful push to Baka-Su/BakaSU `main` (never a PR run) as **UNVERIFIED** artifacts for device testing. Manager-only updates just upload that stable main-branch Manager APK. After you flash and verify a sync build, run `./sync_ksu.sh` locally to formalize it (rebase the fork, bump the submodule) and push per the staged release protocol.
+
+The manual sync workflow has a `force_build` switch for verifying the full
+sync-build path even when upstream has no new commits. Neither workflow
+updates the fork/main source branches; only the rolling build tag is moved.
+
+### Rolling build downloads
+
+The `latest-build` prerelease uses fixed asset names: `kernel.zip`, `Image.gz`,
+`kernel.config`, `System.map`, `Module.symvers`, optional DTB/module archives
+and `Manager-arm64-v8a.apk`, plus `build-info.json` and `SHA256SUMS`.
+Every successful kernel build triggers replacement; Manager-only updates do
+not replace the kernel bundle. `build-info.json` identifies the exact source,
+KernelSU tree, workflow/run/attempt and checksums.
+
+Publishing is serialized across both workflows. Files are uploaded under
+temporary names and verified before the previous assets are renamed/replaced;
+promotion failures roll back. Older queued runs cannot overwrite a newer run.
+The rolling assets are **not** automatically promoted to a device-verified
+fixed release.
 
 ---
 
